@@ -23,6 +23,7 @@ import requests
 DEFAULT_SETTINGS = {
     "api_key": "",
     "ai_service": "Gemini",
+        "gemini_model": "gemini-flash-latest",
     "theme": "dark",
     "font_size": 11,
     "local_model_url": "http://localhost:1234/v1/chat/completions",
@@ -458,6 +459,7 @@ class MainWindow(QMainWindow):
         settings_menu.addAction("Edit AI Prompt...", self.edit_prompt)
         settings_menu.addAction("Set Gemini API Key...", self.set_api_key)
         settings_menu.addAction("Set Local AI URL...", self.set_local_model_url)
+        settings_menu.addAction("Set Gemini Model...", self.set_gemini_model)
         
         # Help Menu
         help_menu = menu_bar.addMenu("Help")
@@ -708,7 +710,8 @@ class MainWindow(QMainWindow):
 
             if service == "Gemini":
                 genai.configure(api_key=self.settings['api_key'])
-                model = genai.GenerativeModel('gemini-1.5-flash')
+                model_name = self.settings.get('gemini_model', 'gemini-flash-latest')
+                model = genai.GenerativeModel(model_name)
                 response = model.generate_content(prompt)
                 polished_text = response.text
             else: # Local AI
@@ -780,6 +783,14 @@ class MainWindow(QMainWindow):
             self.settings["local_model_url"] = new_url
             self.save_settings()
             QMessageBox.information(self, "Success", "Local AI URL updated.")
+
+    def set_gemini_model(self):
+        current = self.settings.get("gemini_model", "gemini-flash-latest")
+        new_model, ok = QInputDialog.getText(self, "Gemini Model", "Enter the Gemini model identifier:", text=current)
+        if ok and new_model:
+            self.settings["gemini_model"] = new_model
+            self.save_settings()
+            QMessageBox.information(self, "Success", f"Gemini model set to: {new_model}")
 
     def clear_all_text(self):
         self.raw_text_area.clear()
