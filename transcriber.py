@@ -24,6 +24,7 @@ import requests
 # --- Default Settings ---
 DEFAULT_SETTINGS = {
     "api_key": "",
+    "gemini_model": "gemini-flash-latest",
     "ai_service": "Gemini",
     "theme": "dark",
     "font_size": 11,
@@ -507,6 +508,7 @@ class MainWindow(QMainWindow):
         settings_menu.addSeparator()
         settings_menu.addAction("Edit AI Prompt...", self.edit_prompt)
         settings_menu.addAction("Set Gemini API Key...", self.set_api_key)
+        settings_menu.addAction("Set Gemini Model...", self.set_gemini_model)
         settings_menu.addAction("Set Local AI URL...", self.set_local_model_url)
         
         # Help Menu
@@ -839,7 +841,8 @@ class MainWindow(QMainWindow):
 
             if service == "Gemini":
                 genai.configure(api_key=self.settings['api_key'])
-                model = genai.GenerativeModel('gemini-1.5-flash')
+                gemini_model_name = self.settings.get('gemini_model', 'gemini-flash-latest')
+                model = genai.GenerativeModel(gemini_model_name)
                 response = model.generate_content(prompt)
                 polished_text = response.text
             else: # Local AI
@@ -904,6 +907,14 @@ class MainWindow(QMainWindow):
             self.settings['api_key'] = text
             self.save_settings()
             QMessageBox.information(self, "Success", "API Key saved.")
+
+    def set_gemini_model(self):
+        current_model = self.settings.get("gemini_model", "gemini-flash-latest")
+        text, ok = QInputDialog.getText(self, "Set Gemini Model", "Enter Gemini Model:", text=current_model)
+        if ok and text:
+            self.settings['gemini_model'] = text
+            self.save_settings()
+            QMessageBox.information(self, "Success", f"Gemini Model saved as {text}.")
 
     def set_local_model_url(self):
         new_url, ok = QInputDialog.getText(self, "Local AI URL", "Enter the URL for your local model:", text=self.settings.get("local_model_url"))
