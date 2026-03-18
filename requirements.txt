@@ -1,7 +1,9 @@
-SpeechRecognition 
-pyaudio 
-google-generativeai 
-pyperclip 
+SpeechRecognition
+pyaudio
+google-generativeai
+pyperclip
 requests
 pyinstaller
 PySide6
+faster-whisper
+numpy

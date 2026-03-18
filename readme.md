@@ -22,6 +22,7 @@ How to get key (I still highly recommend to watch that youtube video above):
 - **AI-Powered Polishing**: Polish the entire text or just a selection using an AI (Gemini or a local model) to correct grammar, improve phrasing, and fix typos.
 - **Modern Theming**: Choose between beautiful, consistent light and dark themes (e.g., Litera, Cyborg, Darkly) powered by the ttkbootstrap library.
 - **Flexible AI Options**: Easily switch between Google's Gemini API and a local AI model running on your machine (e.g., via LM Studio).
+- **Multiple Transcription Engines**: Choose between Google Speech Recognition, local Faster-Whisper, or a Qwen 3 ASR server running on your LAN.
 - **Session Management**:
     - **Save & New**: Save your current transcription and the polished text to a JSON file and clear the editors for a new session.
     - **Open**: Load a previously saved session to continue your work.
@@ -47,6 +48,15 @@ Open a command prompt or PowerShell terminal, navigate to your project folder, a
 To run the application directly from the script, use the following command in your terminal:
 
 `python transcriber.py`
+
+### **5\. Qwen 3 ASR Server Setup**
+
+- The app now supports a third transcription backend: `Qwen 3 ASR Server`.
+- Configure it in `Settings > Transcription Service > Qwen 3 ASR Server`.
+- Set the server address in `Settings > Set Qwen ASR Server URL...`.
+- The default server on this machine is `http://192.168.1.114:8711/transcribe`.
+- This server is designed to be reached through the machine's `192.168.x.x` LAN address, not through `127.0.0.1`.
+- The server deployment in this environment lives under `/mnt/merged_ssd/vocolibri_production/transcription`.
 
 ## **Creating a Standalone Executable (.exe)**
 
