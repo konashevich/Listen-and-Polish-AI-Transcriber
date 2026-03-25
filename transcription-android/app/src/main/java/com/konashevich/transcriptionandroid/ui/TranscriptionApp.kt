@@ -1,6 +1,7 @@
 package com.konashevich.transcriptionandroid.ui
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -32,6 +33,7 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -159,6 +161,17 @@ fun TranscriptionApp(
         }
     }
 
+    val sharePolishedText = {
+        val text = state.polishedTextValue.text.trim()
+        if (text.isNotEmpty()) {
+            val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_TEXT, text)
+            }
+            context.startActivity(Intent.createChooser(shareIntent, "Share polished text"))
+        }
+    }
+
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         topBar = {
@@ -271,6 +284,7 @@ fun TranscriptionApp(
                             state = state,
                             viewModel = viewModel,
                             clipboardText = { clipboardManager.setText(AnnotatedString(state.polishedTextValue.text)) },
+                            shareText = sharePolishedText,
                         )
                     }
                 } else {
@@ -292,6 +306,7 @@ fun TranscriptionApp(
                             state = state,
                             viewModel = viewModel,
                             clipboardText = { clipboardManager.setText(AnnotatedString(state.polishedTextValue.text)) },
+                            shareText = sharePolishedText,
                         )
                     }
                 }
@@ -397,6 +412,7 @@ private fun PolishedEditorPanel(
     state: MainUiState,
     viewModel: MainViewModel,
     clipboardText: () -> Unit,
+    shareText: () -> Unit,
 ) {
     EditorPanel(
         modifier = modifier,
@@ -405,6 +421,12 @@ private fun PolishedEditorPanel(
         onValueChange = viewModel::updatePolishedText,
         fontSizeSp = state.settings.fontSize.editorSp,
         controls = {
+            ActionIconButton(
+                icon = Icons.Filled.Share,
+                contentDescription = "Share polished text",
+                enabled = state.polishedTextValue.text.isNotBlank(),
+                onClick = shareText,
+            )
             ActionIconButton(
                 icon = Icons.Filled.ContentCopy,
                 contentDescription = "Copy polished text",
