@@ -1048,7 +1048,7 @@ class MainWindow(QMainWindow):
             raise RuntimeError("Gemini API key is not configured.")
 
         genai.configure(api_key=api_key)
-        gemini_model_name = self.settings.get("gemini_model", "gemini-flash-latest")
+        gemini_model_name = self.settings["gemini_model"]
         model = genai.GenerativeModel(gemini_model_name)
 
         wav_data = audio_data_to_recognize.get_wav_data(convert_rate=16000, convert_width=2)
@@ -1177,7 +1177,7 @@ class MainWindow(QMainWindow):
 
             if service == "Gemini":
                 genai.configure(api_key=self.settings['api_key'])
-                gemini_model_name = self.settings.get('gemini_model', 'gemini-flash-latest')
+                gemini_model_name = self.settings["gemini_model"]
                 model = genai.GenerativeModel(gemini_model_name)
                 response = model.generate_content(prompt)
                 polished_text = response.text
@@ -1247,7 +1247,7 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Success", "API Key saved.")
 
     def set_gemini_model(self):
-        current_model = self.settings.get("gemini_model", "gemini-flash-latest")
+        current_model = self.settings["gemini_model"]
         text, ok = QInputDialog.getText(self, "Set Gemini Model", "Enter Gemini Model:", text=current_model)
         if ok and text:
             self.settings['gemini_model'] = text

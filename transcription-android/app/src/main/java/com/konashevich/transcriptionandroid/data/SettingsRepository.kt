@@ -1,0 +1,107 @@
+package com.konashevich.transcriptionandroid.data
+
+import android.content.Context
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.preferencesDataStore
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
+
+private val Context.dataStore by preferencesDataStore(name = "app_settings")
+
+class SettingsRepository(private val context: Context) {
+
+    val settingsFlow: Flow<AppSettings> = context.dataStore.data.map { prefs ->
+        AppSettings(
+            themeMode = prefs[Keys.THEME_MODE].toEnumOrDefault(ThemeMode.DARK),
+            fontSize = prefs[Keys.FONT_SIZE].toEnumOrDefault(FontSizeOption.MEDIUM),
+            listenMode = prefs[Keys.LISTEN_MODE].toEnumOrDefault(ListenMode.HOLD),
+            transcriptionService = prefs[Keys.TRANSCRIPTION_SERVICE]
+                .toEnumOrDefault(TranscriptionService.GEMINI),
+            geminiApiKey = prefs[Keys.GEMINI_API_KEY].orEmpty(),
+            geminiModel = prefs[Keys.GEMINI_MODEL].orEmpty().ifBlank { DEFAULT_GEMINI_MODEL },
+            polishPrompt = prefs[Keys.POLISH_PROMPT].orEmpty().ifBlank { DEFAULT_POLISH_PROMPT },
+            serverScheme = prefs[Keys.SERVER_SCHEME].toEnumOrDefault(ServerScheme.HTTP),
+            serverHost = prefs[Keys.SERVER_HOST].orEmpty(),
+            serverPort = prefs[Keys.SERVER_PORT].orEmpty().ifBlank { "8711" },
+            serverPath = prefs[Keys.SERVER_PATH].orEmpty().ifBlank { "/transcribe" },
+            serverTimeoutSeconds = prefs[Keys.SERVER_TIMEOUT_SECONDS] ?: 360,
+        )
+    }
+
+    suspend fun updateThemeMode(value: ThemeMode) = editString(Keys.THEME_MODE, value.name)
+
+    suspend fun updateFontSize(value: FontSizeOption) = editString(Keys.FONT_SIZE, value.name)
+
+    suspend fun updateListenMode(value: ListenMode) = editString(Keys.LISTEN_MODE, value.name)
+
+    suspend fun updateTranscriptionService(value: TranscriptionService) =
+        editString(Keys.TRANSCRIPTION_SERVICE, value.name)
+
+    suspend fun updateGeminiApiKey(value: String) = editString(Keys.GEMINI_API_KEY, value)
+
+    suspend fun updateGeminiModel(value: String) = editString(Keys.GEMINI_MODEL, value)
+
+    suspend fun updatePolishPrompt(value: String) = editString(Keys.POLISH_PROMPT, value)
+
+    suspend fun updateServerScheme(value: ServerScheme) = editString(Keys.SERVER_SCHEME, value.name)
+
+    suspend fun updateServerHost(value: String) = editString(Keys.SERVER_HOST, value)
+
+    suspend fun updateServerPort(value: String) = editString(Keys.SERVER_PORT, value)
+
+    suspend fun updateServerPath(value: String) = editString(Keys.SERVER_PATH, value)
+
+    suspend fun updateServerTimeoutSeconds(value: Int) {
+        context.dataStore.edit { prefs ->
+            prefs[Keys.SERVER_TIMEOUT_SECONDS] = value.coerceAtLeast(1)
+        }
+    }
+
+    suspend fun importSettings(patch: SettingsImportPatch) {
+        context.dataStore.edit { prefs ->
+            patch.themeMode?.let { prefs[Keys.THEME_MODE] = it.name }
+            patch.fontSize?.let { prefs[Keys.FONT_SIZE] = it.name }
+            patch.listenMode?.let { prefs[Keys.LISTEN_MODE] = it.name }
+            patch.transcriptionService?.let { prefs[Keys.TRANSCRIPTION_SERVICE] = it.name }
+            patch.geminiApiKey?.let { prefs[Keys.GEMINI_API_KEY] = it }
+            patch.geminiModel?.let { prefs[Keys.GEMINI_MODEL] = it.ifBlank { DEFAULT_GEMINI_MODEL } }
+            patch.polishPrompt?.let { prefs[Keys.POLISH_PROMPT] = it }
+            patch.serverScheme?.let { prefs[Keys.SERVER_SCHEME] = it.name }
+            patch.serverHost?.let { prefs[Keys.SERVER_HOST] = it }
+            patch.serverPort?.let { prefs[Keys.SERVER_PORT] = it }
+            patch.serverPath?.let { prefs[Keys.SERVER_PATH] = it }
+            patch.serverTimeoutSeconds?.let { prefs[Keys.SERVER_TIMEOUT_SECONDS] = it.coerceAtLeast(1) }
+        }
+    }
+
+    private suspend fun editString(
+        key: androidx.datastore.preferences.core.Preferences.Key<String>,
+        value: String,
+    ) {
+        context.dataStore.edit { prefs ->
+            prefs[key] = value
+        }
+    }
+
+    private object Keys {
+        val THEME_MODE = stringPreferencesKey("theme_mode")
+        val FONT_SIZE = stringPreferencesKey("font_size")
+        val LISTEN_MODE = stringPreferencesKey("listen_mode")
+        val TRANSCRIPTION_SERVICE = stringPreferencesKey("transcription_service")
+        val GEMINI_API_KEY = stringPreferencesKey("gemini_api_key")
+        val GEMINI_MODEL = stringPreferencesKey("gemini_model")
+        val POLISH_PROMPT = stringPreferencesKey("polish_prompt")
+        val SERVER_SCHEME = stringPreferencesKey("server_scheme")
+        val SERVER_HOST = stringPreferencesKey("server_host")
+        val SERVER_PORT = stringPreferencesKey("server_port")
+        val SERVER_PATH = stringPreferencesKey("server_path")
+        val SERVER_TIMEOUT_SECONDS = intPreferencesKey("server_timeout_seconds")
+    }
+}
+
+private inline fun <reified T : Enum<T>> String?.toEnumOrDefault(default: T): T {
+    val value = this ?: return default
+    return enumValues<T>().firstOrNull { it.name == value } ?: default
+}

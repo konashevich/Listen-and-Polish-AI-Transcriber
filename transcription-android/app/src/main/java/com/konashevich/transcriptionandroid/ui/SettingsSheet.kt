@@ -1,0 +1,257 @@
+package com.konashevich.transcriptionandroid.ui
+
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.unit.dp
+import com.konashevich.transcriptionandroid.data.AppSettings
+import com.konashevich.transcriptionandroid.data.FontSizeOption
+import com.konashevich.transcriptionandroid.data.ListenMode
+import com.konashevich.transcriptionandroid.data.ServerScheme
+import com.konashevich.transcriptionandroid.data.ThemeMode
+import com.konashevich.transcriptionandroid.data.TranscriptionService
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@Composable
+fun SettingsSheet(
+    settings: AppSettings,
+    onDismiss: () -> Unit,
+    onThemeChanged: (ThemeMode) -> Unit,
+    onFontSizeChanged: (FontSizeOption) -> Unit,
+    onListenModeChanged: (ListenMode) -> Unit,
+    onTranscriptionServiceChanged: (TranscriptionService) -> Unit,
+    onGeminiApiKeyChanged: (String) -> Unit,
+    onGeminiModelChanged: (String) -> Unit,
+    onPolishPromptChanged: (String) -> Unit,
+    onServerSchemeChanged: (ServerScheme) -> Unit,
+    onServerHostChanged: (String) -> Unit,
+    onServerPortChanged: (String) -> Unit,
+    onServerPathChanged: (String) -> Unit,
+    onServerTimeoutChanged: (String) -> Unit,
+    onImportSettings: () -> Unit,
+) {
+    var timeoutText by rememberSaveable(settings.serverTimeoutSeconds) {
+        mutableStateOf(settings.serverTimeoutSeconds.toString())
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        modifier = Modifier.windowInsetsPadding(WindowInsets.navigationBars),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp)
+                .padding(bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(18.dp),
+        ) {
+            SettingsSection("Transcription Service") {
+                ChoiceChips(
+                    values = TranscriptionService.entries.toList(),
+                    selected = settings.transcriptionService,
+                    labelOf = { it.label },
+                    onSelected = onTranscriptionServiceChanged,
+                )
+            }
+
+            SettingsSection("AI Service") {
+                AssistChip(
+                    onClick = {},
+                    enabled = false,
+                    label = { Text("Gemini only on Android") },
+                )
+            }
+
+            SettingsSection("Theme") {
+                ChoiceChips(
+                    values = ThemeMode.entries.toList(),
+                    selected = settings.themeMode,
+                    labelOf = { it.label },
+                    onSelected = onThemeChanged,
+                )
+            }
+
+            SettingsSection("Font Size") {
+                ChoiceChips(
+                    values = FontSizeOption.entries.toList(),
+                    selected = settings.fontSize,
+                    labelOf = { it.label },
+                    onSelected = onFontSizeChanged,
+                )
+            }
+
+            SettingsSection("Listen Mode") {
+                ChoiceChips(
+                    values = ListenMode.entries.toList(),
+                    selected = settings.listenMode,
+                    labelOf = { it.label },
+                    onSelected = onListenModeChanged,
+                )
+            }
+
+            SettingsSection("Settings Import") {
+                Text(
+                    text = "Import supported values from a desktop-style settings JSON on the device.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                OutlinedButton(onClick = onImportSettings) {
+                    Text("Import Settings JSON")
+                }
+            }
+
+            SettingsSection("Gemini") {
+                OutlinedTextField(
+                    modifier = Modifier.fillMaxWidth(),
+                    value = settings.geminiApiKey,
+                    onValueChange = onGeminiApiKeyChanged,
+                    label = { Text("API Key") },
+                    visualTransformation = PasswordVisualTransformation(),
+                )
+                OutlinedTextField(
+                    modifier = Modifier.fillMaxWidth(),
+                    value = settings.geminiModel,
+                    onValueChange = onGeminiModelChanged,
+                    label = { Text("Model") },
+                )
+            }
+
+            SettingsSection("Self-hosted ASR") {
+                ChoiceChips(
+                    values = ServerScheme.entries.toList(),
+                    selected = settings.serverScheme,
+                    labelOf = { it.label },
+                    onSelected = onServerSchemeChanged,
+                )
+                OutlinedTextField(
+                    modifier = Modifier.fillMaxWidth(),
+                    value = settings.serverHost,
+                    onValueChange = onServerHostChanged,
+                    label = { Text("Host or IP") },
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedTextField(
+                        modifier = Modifier.weight(1f),
+                        value = settings.serverPort,
+                        onValueChange = onServerPortChanged,
+                        label = { Text("Port") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    )
+                    OutlinedTextField(
+                        modifier = Modifier.weight(1f),
+                        value = timeoutText,
+                        onValueChange = { newValue ->
+                            val filtered = newValue.filter(Char::isDigit)
+                            timeoutText = filtered
+                            if (filtered.isNotEmpty()) {
+                                onServerTimeoutChanged(filtered)
+                            }
+                        },
+                        label = { Text("Timeout (s)") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    )
+                }
+                OutlinedTextField(
+                    modifier = Modifier.fillMaxWidth(),
+                    value = settings.serverPath,
+                    onValueChange = onServerPathChanged,
+                    label = { Text("Path") },
+                )
+                settings.selfHostedUrl()?.let { previewUrl ->
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        shape = MaterialTheme.shapes.medium,
+                    ) {
+                        Text(
+                            text = previewUrl,
+                            modifier = Modifier.padding(12.dp),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+
+            SettingsSection("Polish Prompt") {
+                OutlinedTextField(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 180.dp),
+                    value = settings.polishPrompt,
+                    onValueChange = onPolishPromptChanged,
+                    label = { Text("System Prompt") },
+                )
+            }
+
+            Spacer(Modifier.height(12.dp))
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun <T> ChoiceChips(
+    values: List<T>,
+    selected: T,
+    labelOf: (T) -> String,
+    onSelected: (T) -> Unit,
+) {
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        values.forEach { option ->
+            FilterChip(
+                selected = option == selected,
+                onClick = { onSelected(option) },
+                label = { Text(labelOf(option)) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun SettingsSection(
+    title: String,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.primary,
+        )
+        content()
+    }
+}

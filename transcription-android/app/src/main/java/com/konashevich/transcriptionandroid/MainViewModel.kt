@@ -1,0 +1,597 @@
+package com.konashevich.transcriptionandroid
+
+import android.app.Application
+import android.net.Uri
+import android.provider.OpenableColumns
+import android.webkit.MimeTypeMap
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
+import com.konashevich.transcriptionandroid.audio.AudioRecorder
+import com.konashevich.transcriptionandroid.data.AppSettings
+import com.konashevich.transcriptionandroid.data.FontSizeOption
+import com.konashevich.transcriptionandroid.data.GeminiApiClient
+import com.konashevich.transcriptionandroid.data.ImportedAudio
+import com.konashevich.transcriptionandroid.data.ListenMode
+import com.konashevich.transcriptionandroid.data.parseDesktopSettingsImport
+import com.konashevich.transcriptionandroid.data.SelfHostedAsrClient
+import com.konashevich.transcriptionandroid.data.ServerScheme
+import com.konashevich.transcriptionandroid.data.SettingsRepository
+import com.konashevich.transcriptionandroid.data.ThemeMode
+import com.konashevich.transcriptionandroid.data.TranscriptionService
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.json.JSONObject
+import java.io.File
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
+import java.util.ArrayDeque
+import java.util.Locale
+
+data class MainUiState(
+    val settings: AppSettings = AppSettings(),
+    val rawTextValue: TextFieldValue = TextFieldValue(""),
+    val polishedTextValue: TextFieldValue = TextFieldValue(""),
+    val importedAudio: ImportedAudio? = null,
+    val isRecording: Boolean = false,
+    val isImportingAudio: Boolean = false,
+    val isTranscribing: Boolean = false,
+    val isPolishing: Boolean = false,
+)
+
+sealed interface UiEvent {
+    data class Snackbar(val message: String) : UiEvent
+}
+
+class MainViewModel(application: Application) : AndroidViewModel(application) {
+    private val settingsRepository = SettingsRepository(application)
+    private val geminiApiClient = GeminiApiClient()
+    private val selfHostedAsrClient = SelfHostedAsrClient()
+    private val audioRecorder = AudioRecorder(application)
+
+    private val _uiState = MutableStateFlow(MainUiState())
+    val uiState: StateFlow<MainUiState> = _uiState.asStateFlow()
+
+    private val _events = MutableSharedFlow<UiEvent>()
+    val events: SharedFlow<UiEvent> = _events.asSharedFlow()
+    private val pendingSharedImports = ArrayDeque<PendingImportRequest>()
+
+    init {
+        viewModelScope.launch {
+            settingsRepository.settingsFlow.collectLatest { settings ->
+                _uiState.update { it.copy(settings = settings) }
+            }
+        }
+    }
+
+    fun updateRawText(value: TextFieldValue) {
+        _uiState.update { it.copy(rawTextValue = value) }
+    }
+
+    fun updatePolishedText(value: TextFieldValue) {
+        _uiState.update { it.copy(polishedTextValue = value) }
+    }
+
+    fun clearRawText() {
+        _uiState.update { it.copy(rawTextValue = TextFieldValue("")) }
+    }
+
+    fun clearPolishedText() {
+        _uiState.update { it.copy(polishedTextValue = TextFieldValue("")) }
+    }
+
+    fun clearAllText() {
+        _uiState.update {
+            it.copy(
+                rawTextValue = TextFieldValue(""),
+                polishedTextValue = TextFieldValue(""),
+            )
+        }
+    }
+
+    fun clearImportedAudio() {
+        if (isAudioOperationInProgress()) {
+            emitMessage("Wait for the current audio operation to finish before clearing the audio.")
+            return
+        }
+        val audio = _uiState.value.importedAudio
+        audio?.file?.delete()
+        _uiState.update { it.copy(importedAudio = null) }
+    }
+
+    fun handleSharedAudioUris(uris: List<Uri>) {
+        if (uris.isEmpty()) {
+            return
+        }
+
+        if (uris.size > 1) {
+            emitMessage("Received ${uris.size} audio files. Using the first one.")
+        }
+
+        val request = PendingImportRequest(
+            uri = uris.first(),
+            sourceLabel = "Shared from another app",
+            autoTranscribe = true,
+        )
+
+        pendingSharedImports.addLast(request)
+        if (isAudioOperationInProgress()) {
+            emitMessage("Queued shared audio. It will import when the current audio operation finishes.")
+            return
+        }
+
+        processPendingSharedImportIfIdle()
+    }
+
+    fun importAudioFromUri(
+        uri: Uri,
+        sourceLabel: String,
+        autoTranscribe: Boolean,
+    ) {
+        if (isAudioOperationInProgress()) {
+            emitMessage("Wait for the current audio operation to finish before importing another audio file.")
+            return
+        }
+
+        startImport(
+            PendingImportRequest(
+                uri = uri,
+                sourceLabel = sourceLabel,
+                autoTranscribe = autoTranscribe,
+            ),
+        )
+    }
+
+    fun startRecording() {
+        val state = _uiState.value
+        if (state.isRecording || state.isTranscribing) {
+            return
+        }
+
+        runCatching {
+            val file = newRecordingFile()
+            audioRecorder.start(file)
+        }.onSuccess {
+            _uiState.update { it.copy(isRecording = true) }
+        }.onFailure { error ->
+            emitMessage("Failed to start recording: ${error.message ?: error.javaClass.simpleName}")
+        }
+    }
+
+    fun stopRecording() {
+        if (!_uiState.value.isRecording) {
+            return
+        }
+
+        _uiState.update { it.copy(isRecording = false) }
+
+        viewModelScope.launch {
+            val recordingFile = runCatching { audioRecorder.stop() }
+                .getOrNull()
+                ?.takeIf { it.exists() && it.length() > 0L }
+
+            if (recordingFile == null) {
+                emitMessage("No usable recording was captured.")
+                return@launch
+            }
+
+            val importedAudio = ImportedAudio(
+                file = recordingFile,
+                displayName = recordingFile.name,
+                mimeType = "audio/mp4",
+                sourceLabel = "Recorded in app",
+            )
+
+            replaceImportedAudio(importedAudio)
+            transcribeImportedAudio()
+        }
+    }
+
+    fun transcribeImportedAudio() {
+        val importedAudio = _uiState.value.importedAudio
+        if (importedAudio == null) {
+            emitMessage("No audio file is loaded.")
+            return
+        }
+
+        if (_uiState.value.isImportingAudio) {
+            emitMessage("Wait for the selected audio to finish importing.")
+            return
+        }
+
+        if (_uiState.value.isTranscribing) {
+            return
+        }
+
+        _uiState.update { it.copy(isTranscribing = true) }
+        viewModelScope.launch {
+            try {
+                val settings = _uiState.value.settings
+                val transcript = when (settings.transcriptionService) {
+                    TranscriptionService.GEMINI ->
+                        geminiApiClient.transcribeAudio(importedAudio.file, importedAudio.mimeType, settings)
+
+                    TranscriptionService.SELF_HOSTED ->
+                        selfHostedAsrClient.transcribeAudio(importedAudio.file, importedAudio.mimeType, settings)
+                }
+
+                _uiState.update { state ->
+                    state.copy(
+                        rawTextValue = insertIntoField(
+                            current = state.rawTextValue,
+                            insertion = buildTranscriptInsertion(
+                                currentText = state.rawTextValue.text,
+                                transcript = transcript,
+                                sourceLabel = importedAudio.sourceLabel,
+                            ),
+                        ),
+                    )
+                }
+                emitMessage("Transcription added to Raw Transcription.")
+            } catch (error: Exception) {
+                emitMessage("Transcription failed: ${error.message ?: error.javaClass.simpleName}")
+            } finally {
+                _uiState.update { it.copy(isTranscribing = false) }
+                processPendingSharedImportIfIdle()
+            }
+        }
+    }
+
+    fun polishText() {
+        if (_uiState.value.isPolishing) {
+            return
+        }
+
+        val rawText = _uiState.value.rawTextValue
+        val textToPolish = selectedText(rawText).ifBlank { rawText.text.trim() }
+        if (textToPolish.isBlank()) {
+            emitMessage("Nothing to polish.")
+            return
+        }
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isPolishing = true) }
+            try {
+                val polished = geminiApiClient.polishText(textToPolish, _uiState.value.settings)
+                _uiState.update { state ->
+                    state.copy(
+                        polishedTextValue = insertIntoField(
+                            current = state.polishedTextValue,
+                            insertion = polished.trim(),
+                        ),
+                    )
+                }
+                emitMessage("Polished text added.")
+            } catch (error: Exception) {
+                emitMessage("Polish failed: ${error.message ?: error.javaClass.simpleName}")
+            } finally {
+                _uiState.update { it.copy(isPolishing = false) }
+            }
+        }
+    }
+
+    fun exportSessionTo(uri: Uri) {
+        viewModelScope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    getApplication<Application>().contentResolver.openOutputStream(uri)?.bufferedWriter()?.use { writer ->
+                        writer.write(buildSessionJson())
+                    } ?: error("Could not open the session file for writing.")
+                }
+            }.onSuccess {
+                emitMessage("Session saved.")
+            }.onFailure { error ->
+                emitMessage("Failed to save session: ${error.message ?: error.javaClass.simpleName}")
+            }
+        }
+    }
+
+    fun importSessionFrom(uri: Uri) {
+        viewModelScope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    getApplication<Application>().contentResolver.openInputStream(uri)?.bufferedReader()?.use { reader ->
+                        reader.readText()
+                    } ?: error("Could not open the session file.")
+                }
+            }.onSuccess { content ->
+                loadSessionJson(content)
+                emitMessage("Session loaded.")
+            }.onFailure { error ->
+                emitMessage("Failed to load session: ${error.message ?: error.javaClass.simpleName}")
+            }
+        }
+    }
+
+    fun exportImportedAudioTo(uri: Uri) {
+        val importedAudio = _uiState.value.importedAudio
+        if (importedAudio == null) {
+            emitMessage("No imported audio is loaded.")
+            return
+        }
+
+        viewModelScope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    getApplication<Application>().contentResolver.openOutputStream(uri)?.use { output ->
+                        importedAudio.file.inputStream().use { input ->
+                            input.copyTo(output)
+                        }
+                    } ?: error("Could not open the audio file for writing.")
+                }
+            }.onSuccess {
+                emitMessage("Audio saved.")
+            }.onFailure { error ->
+                emitMessage("Failed to save audio: ${error.message ?: error.javaClass.simpleName}")
+            }
+        }
+    }
+
+    fun importSettingsFrom(uri: Uri) {
+        viewModelScope.launch {
+            runCatching {
+                val content = withContext(Dispatchers.IO) {
+                    getApplication<Application>().contentResolver.openInputStream(uri)?.bufferedReader()?.use { reader ->
+                        reader.readText()
+                    } ?: error("Could not open the settings file.")
+                }
+
+                val patch = parseDesktopSettingsImport(content)
+                if (!patch.hasAnyValue()) {
+                    error("The selected file did not contain any supported settings.")
+                }
+
+                settingsRepository.importSettings(patch)
+            }.onSuccess {
+                emitMessage("Settings imported.")
+            }.onFailure { error ->
+                emitMessage("Failed to import settings: ${error.message ?: error.javaClass.simpleName}")
+            }
+        }
+    }
+
+    fun suggestedSessionFileName(): String {
+        val now = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd-HH-mm"))
+        val snippet = _uiState.value.rawTextValue.text
+            .trim()
+            .split(Regex("\\s+"))
+            .take(3)
+            .joinToString("_")
+            .replace(Regex("[^A-Za-z0-9_-]"), "_")
+            .trim('_')
+            .ifBlank { "transcription" }
+        return "${now}_${snippet}.json"
+    }
+
+    fun updateThemeMode(value: ThemeMode) = persist { settingsRepository.updateThemeMode(value) }
+
+    fun updateFontSize(value: FontSizeOption) = persist { settingsRepository.updateFontSize(value) }
+
+    fun updateListenMode(value: ListenMode) = persist { settingsRepository.updateListenMode(value) }
+
+    fun updateTranscriptionService(value: TranscriptionService) =
+        persist { settingsRepository.updateTranscriptionService(value) }
+
+    fun updateGeminiApiKey(value: String) = persist { settingsRepository.updateGeminiApiKey(value) }
+
+    fun updateGeminiModel(value: String) = persist { settingsRepository.updateGeminiModel(value) }
+
+    fun updatePolishPrompt(value: String) = persist { settingsRepository.updatePolishPrompt(value) }
+
+    fun updateServerScheme(value: ServerScheme) = persist { settingsRepository.updateServerScheme(value) }
+
+    fun updateServerHost(value: String) = persist { settingsRepository.updateServerHost(value) }
+
+    fun updateServerPort(value: String) = persist { settingsRepository.updateServerPort(value) }
+
+    fun updateServerPath(value: String) = persist { settingsRepository.updateServerPath(value) }
+
+    fun updateServerTimeoutSeconds(value: String) {
+        val parsed = value.toIntOrNull()
+        if (parsed == null) {
+            emitMessage("Timeout must be a whole number of seconds.")
+            return
+        }
+        persist { settingsRepository.updateServerTimeoutSeconds(parsed) }
+    }
+
+    override fun onCleared() {
+        audioRecorder.stopAndDiscard()
+        _uiState.value.importedAudio?.file?.delete()
+        super.onCleared()
+    }
+
+    private fun startImport(request: PendingImportRequest) {
+        _uiState.update { it.copy(isImportingAudio = true) }
+
+        viewModelScope.launch {
+            runCatching {
+                copyUriToImportedAudio(request.uri, request.sourceLabel)
+            }.onSuccess { importedAudio ->
+                replaceImportedAudio(importedAudio)
+                emitMessage("${importedAudio.displayName} is ready.")
+                _uiState.update { it.copy(isImportingAudio = false) }
+                if (request.autoTranscribe) {
+                    transcribeImportedAudio()
+                } else {
+                    processPendingSharedImportIfIdle()
+                }
+            }.onFailure { error ->
+                _uiState.update { it.copy(isImportingAudio = false) }
+                emitMessage("Failed to import audio: ${error.message ?: error.javaClass.simpleName}")
+                processPendingSharedImportIfIdle()
+            }
+        }
+    }
+
+    private fun processPendingSharedImportIfIdle() {
+        if (isAudioOperationInProgress()) {
+            return
+        }
+
+        if (pendingSharedImports.isEmpty()) {
+            return
+        }
+
+        val nextRequest = pendingSharedImports.removeFirst()
+        startImport(nextRequest)
+    }
+
+    private fun isAudioOperationInProgress(): Boolean {
+        val state = _uiState.value
+        return state.isImportingAudio || state.isTranscribing
+    }
+
+    private suspend fun copyUriToImportedAudio(uri: Uri, sourceLabel: String): ImportedAudio {
+        val resolver = getApplication<Application>().contentResolver
+        val displayName = queryDisplayName(uri) ?: "audio_${System.currentTimeMillis()}"
+        val mimeType = resolver.getType(uri).orEmpty().ifBlank { guessMimeType(displayName) }
+        val cacheDir = File(getApplication<Application>().cacheDir, "imports").apply { mkdirs() }
+        val safeName = displayName.lowercase(Locale.US).replace(Regex("[^a-z0-9._-]"), "_")
+        val targetFile = File(cacheDir, "${System.currentTimeMillis()}_$safeName")
+
+        withContext(Dispatchers.IO) {
+            resolver.openInputStream(uri)?.use { input ->
+                targetFile.outputStream().use { output ->
+                    input.copyTo(output)
+                }
+            } ?: error("The selected audio file could not be opened.")
+        }
+
+        return ImportedAudio(
+            file = targetFile,
+            displayName = displayName,
+            mimeType = mimeType.ifBlank { "audio/*" },
+            sourceLabel = sourceLabel,
+        )
+    }
+
+    private fun queryDisplayName(uri: Uri): String? {
+        val resolver = getApplication<Application>().contentResolver
+        return resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+            ?.use { cursor ->
+                val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (index >= 0 && cursor.moveToFirst()) {
+                    cursor.getString(index)
+                } else {
+                    null
+                }
+            }
+    }
+
+    private fun guessMimeType(fileName: String): String {
+        val extension = fileName.substringAfterLast('.', "").lowercase(Locale.US)
+        return MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension).orEmpty()
+    }
+
+    private fun newRecordingFile(): File {
+        val dir = File(getApplication<Application>().cacheDir, "recordings").apply { mkdirs() }
+        val timestamp = System.currentTimeMillis()
+        return File(dir, "recording_$timestamp.m4a")
+    }
+
+    private fun replaceImportedAudio(newAudio: ImportedAudio) {
+        val existing = _uiState.value.importedAudio
+        if (existing?.file?.absolutePath != newAudio.file.absolutePath) {
+            existing?.file?.delete()
+        }
+        _uiState.update { it.copy(importedAudio = newAudio) }
+    }
+
+    private fun buildSessionJson(): String {
+        return JSONObject()
+            .put("raw_text", _uiState.value.rawTextValue.text)
+            .put("polished_text", _uiState.value.polishedTextValue.text)
+            .toString(2)
+    }
+
+    private fun loadSessionJson(content: String) {
+        val root = JSONObject(content)
+        val rawText = root.optString("raw_text")
+        val polishedText = root.optString("polished_text")
+        _uiState.update {
+            it.copy(
+                rawTextValue = TextFieldValue(rawText, selection = TextRange(rawText.length)),
+                polishedTextValue = TextFieldValue(
+                    polishedText,
+                    selection = TextRange(polishedText.length),
+                ),
+            )
+        }
+    }
+
+    private fun emitMessage(message: String) {
+        viewModelScope.launch {
+            _events.emit(UiEvent.Snackbar(message))
+        }
+    }
+
+    private fun persist(block: suspend () -> Unit) {
+        viewModelScope.launch {
+            runCatching { block() }
+                .onFailure { emitMessage("Failed to save setting: ${it.message ?: it.javaClass.simpleName}") }
+        }
+    }
+}
+
+private fun selectedText(value: TextFieldValue): String {
+    val start = minOf(value.selection.start, value.selection.end)
+    val end = maxOf(value.selection.start, value.selection.end)
+    if (start == end) {
+        return ""
+    }
+    return value.text.substring(start, end).trim()
+}
+
+private fun insertIntoField(current: TextFieldValue, insertion: String): TextFieldValue {
+    val start = minOf(current.selection.start, current.selection.end).coerceIn(0, current.text.length)
+    val end = maxOf(current.selection.start, current.selection.end).coerceIn(0, current.text.length)
+    val newText = buildString {
+        append(current.text.substring(0, start))
+        append(insertion)
+        append(current.text.substring(end))
+    }
+    val newCursor = start + insertion.length
+    return current.copy(text = newText, selection = TextRange(newCursor))
+}
+
+private fun buildTranscriptInsertion(
+    currentText: String,
+    transcript: String,
+    sourceLabel: String,
+): String {
+    val trimmed = transcript.trim()
+    if (trimmed.isEmpty()) {
+        return ""
+    }
+
+    return if (sourceLabel == "Recorded in app") {
+        if (currentText.isBlank()) {
+            trimmed
+        } else {
+            " $trimmed"
+        }
+    } else {
+        if (currentText.isBlank()) {
+            trimmed
+        } else {
+            "\n\n$trimmed"
+        }
+    }
+}
+
+private data class PendingImportRequest(
+    val uri: Uri,
+    val sourceLabel: String,
+    val autoTranscribe: Boolean,
+)
