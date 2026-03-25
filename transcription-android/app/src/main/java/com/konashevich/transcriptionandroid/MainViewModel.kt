@@ -1,4 +1,4 @@
-package com.konashevich.transcriptionandroid
+package com.konashevich.pressscribe
 
 import android.app.Application
 import android.net.Uri
@@ -8,18 +8,18 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.konashevich.transcriptionandroid.audio.AudioRecorder
-import com.konashevich.transcriptionandroid.data.AppSettings
-import com.konashevich.transcriptionandroid.data.FontSizeOption
-import com.konashevich.transcriptionandroid.data.GeminiApiClient
-import com.konashevich.transcriptionandroid.data.ImportedAudio
-import com.konashevich.transcriptionandroid.data.ListenMode
-import com.konashevich.transcriptionandroid.data.parseDesktopSettingsImport
-import com.konashevich.transcriptionandroid.data.SelfHostedAsrClient
-import com.konashevich.transcriptionandroid.data.ServerScheme
-import com.konashevich.transcriptionandroid.data.SettingsRepository
-import com.konashevich.transcriptionandroid.data.ThemeMode
-import com.konashevich.transcriptionandroid.data.TranscriptionService
+import com.konashevich.pressscribe.audio.AudioRecorder
+import com.konashevich.pressscribe.data.AppSettings
+import com.konashevich.pressscribe.data.FontSizeOption
+import com.konashevich.pressscribe.data.GeminiApiClient
+import com.konashevich.pressscribe.data.ImportedAudio
+import com.konashevich.pressscribe.data.ListenMode
+import com.konashevich.pressscribe.data.parseDesktopSettingsImport
+import com.konashevich.pressscribe.data.SelfHostedAsrClient
+import com.konashevich.pressscribe.data.ServerScheme
+import com.konashevich.pressscribe.data.SettingsRepository
+import com.konashevich.pressscribe.data.ThemeMode
+import com.konashevich.pressscribe.data.TranscriptionService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -29,6 +29,8 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -44,6 +46,7 @@ data class MainUiState(
     val polishedTextValue: TextFieldValue = TextFieldValue(""),
     val importedAudio: ImportedAudio? = null,
     val isRecording: Boolean = false,
+    val listeningLevel: Float = 0f,
     val isImportingAudio: Boolean = false,
     val isTranscribing: Boolean = false,
     val isPolishing: Boolean = false,
@@ -65,6 +68,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _events = MutableSharedFlow<UiEvent>()
     val events: SharedFlow<UiEvent> = _events.asSharedFlow()
     private val pendingSharedImports = ArrayDeque<PendingImportRequest>()
+    private var levelMeterJob: Job? = null
 
     init {
         viewModelScope.launch {
@@ -162,7 +166,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val file = newRecordingFile()
             audioRecorder.start(file)
         }.onSuccess {
-            _uiState.update { it.copy(isRecording = true) }
+            _uiState.update { it.copy(isRecording = true, listeningLevel = 0f) }
+            startLevelMeter()
         }.onFailure { error ->
             emitMessage("Failed to start recording: ${error.message ?: error.javaClass.simpleName}")
         }
@@ -173,7 +178,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
 
-        _uiState.update { it.copy(isRecording = false) }
+        levelMeterJob?.cancel()
+        levelMeterJob = null
+        _uiState.update { it.copy(isRecording = false, listeningLevel = 0f) }
 
         viewModelScope.launch {
             val recordingFile = runCatching { audioRecorder.stop() }
@@ -405,10 +412,34 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         persist { settingsRepository.updateServerTimeoutSeconds(parsed) }
     }
 
+    fun updateVibrationDurationMs(value: String) {
+        val parsed = value.toIntOrNull()
+        if (parsed == null) {
+            emitMessage("Vibration duration must be a whole number of milliseconds.")
+            return
+        }
+        persist { settingsRepository.updateVibrationDurationMs(parsed) }
+    }
+
     override fun onCleared() {
+        levelMeterJob?.cancel()
         audioRecorder.stopAndDiscard()
         _uiState.value.importedAudio?.file?.delete()
         super.onCleared()
+    }
+
+    private fun startLevelMeter() {
+        levelMeterJob?.cancel()
+        levelMeterJob = viewModelScope.launch {
+            while (_uiState.value.isRecording) {
+                val level = audioRecorder.currentLevel()
+                _uiState.update { current ->
+                    val smoothed = (current.listeningLevel * 0.58f) + (level * 0.42f)
+                    current.copy(listeningLevel = smoothed.coerceIn(0f, 1f))
+                }
+                delay(70)
+            }
+        }
     }
 
     private fun startImport(request: PendingImportRequest) {

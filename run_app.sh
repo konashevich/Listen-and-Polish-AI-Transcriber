@@ -1,4 +1,4 @@
 #!/bin/bash
-cd /mnt/merged_ssd/Listen-and-Polish-AI-Transcriber
+cd /mnt/merged_ssd/PressScribe-AI-Audio-Notes
 source venv/bin/activate
 python transcriber.py

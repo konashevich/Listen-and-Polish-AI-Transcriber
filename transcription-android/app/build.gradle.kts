@@ -5,11 +5,11 @@ plugins {
 }
 
 android {
-    namespace = "com.konashevich.transcriptionandroid"
+    namespace = "com.konashevich.pressscribe"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.konashevich.transcriptionandroid"
+        applicationId = "com.konashevich.pressscribe"
         minSdk = 26
         targetSdk = 35
         versionCode = 1

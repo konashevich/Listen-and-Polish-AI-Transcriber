@@ -1,4 +1,4 @@
-package com.konashevich.transcriptionandroid.ui
+package com.konashevich.pressscribe.ui
 
 import android.app.Activity
 import android.content.Context

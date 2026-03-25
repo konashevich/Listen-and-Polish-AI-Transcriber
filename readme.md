@@ -1,4 +1,4 @@
-# **LISTEN & POLISH -  AI Transcriber**
+# **PressScribe**
 
 A desktop application for Windows (Mac and Linux - use Python script or build your own distributive) that allows you to transcribe your speech in real-time, polish the text using AI, and manage your transcriptions with a simple and intuitive interface.
 
@@ -68,12 +68,12 @@ You can package the application into a single .exe file that can be run on any W
     
 2.  Build the Executable:  
     In your terminal, from the project directory, run the following command. It is recommended to run PyInstaller as a Python module to avoid potential path issues.  
-    `python -m PyInstaller --onefile --windowed --name="Smart AI Recorder Transcriber" --icon="icon.ico" transcriber.py`  
+    `python -m PyInstaller --onefile --windowed --name="PressScribe" --icon="icon.ico" transcriber.py`  
     or (if you want to create with embedded icon image):  
-    `python -m PyInstaller "Listen and Polish - AI Transcriber.spec"`
+    `python -m PyInstaller "PressScribe.spec"`
     
     - \--onefile: Bundles everything into a single .exe file.
     - \--windowed: Prevents a console window from appearing when the application runs.
     - \--name: Sets the name of the final executable.
 3.  Find Your Application:  
-    Once the process is complete, you will find Smart AI Recorder Transcriber.exe inside a new folder named dist. You can share this file with others.
+    Once the process is complete, you will find PressScribe.exe inside a new folder named dist. You can share this file with others.

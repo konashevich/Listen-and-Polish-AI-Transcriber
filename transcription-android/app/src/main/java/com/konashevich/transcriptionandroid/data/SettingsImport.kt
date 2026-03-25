@@ -1,4 +1,4 @@
-package com.konashevich.transcriptionandroid.data
+package com.konashevich.pressscribe.data
 
 import org.json.JSONObject
 import java.net.URI
@@ -16,6 +16,7 @@ data class SettingsImportPatch(
     val serverPort: String? = null,
     val serverPath: String? = null,
     val serverTimeoutSeconds: Int? = null,
+    val vibrationDurationMs: Int? = null,
 ) {
     fun hasAnyValue(): Boolean {
         return themeMode != null ||
@@ -29,7 +30,8 @@ data class SettingsImportPatch(
             serverHost != null ||
             serverPort != null ||
             serverPath != null ||
-            serverTimeoutSeconds != null
+            serverTimeoutSeconds != null ||
+            vibrationDurationMs != null
     }
 }
 
@@ -52,6 +54,8 @@ fun parseDesktopSettingsImport(content: String): SettingsImportPatch {
         serverPort = importedAsrUrl?.port,
         serverPath = importedAsrUrl?.path,
         serverTimeoutSeconds = root.optImportedValue("qwen_asr_timeout_seconds").toPositiveInt(),
+        vibrationDurationMs = root.optImportedValue("vibration_duration_ms").toNonNegativeInt()
+            ?: root.optImportedValue("haptic_duration_ms").toNonNegativeInt(),
     )
 }
 
@@ -71,6 +75,7 @@ private fun JSONObject.optImportedValue(key: String): Any? {
 
 private fun String.toThemeMode(): ThemeMode? {
     return when (trim().lowercase()) {
+        "auto", "system", "follow device", "follow-device", "device" -> ThemeMode.AUTO
         "dark" -> ThemeMode.DARK
         "light" -> ThemeMode.LIGHT
         else -> null
@@ -118,6 +123,16 @@ private fun Any?.toPositiveInt(): Int? {
     } ?: return null
 
     return value.takeIf { it > 0 }
+}
+
+private fun Any?.toNonNegativeInt(): Int? {
+    val value = when (this) {
+        is Number -> toInt()
+        is String -> trim().toIntOrNull()
+        else -> null
+    } ?: return null
+
+    return value.takeIf { it >= 0 }
 }
 
 private fun parseSelfHostedUrl(rawUrl: String): ImportedSelfHostedUrl? {

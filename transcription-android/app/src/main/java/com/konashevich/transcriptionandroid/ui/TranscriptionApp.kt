@@ -1,16 +1,25 @@
-package com.konashevich.transcriptionandroid.ui
+package com.konashevich.pressscribe.ui
 
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -48,12 +57,14 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -68,14 +79,26 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
-import com.konashevich.transcriptionandroid.MainUiState
-import com.konashevich.transcriptionandroid.MainViewModel
-import com.konashevich.transcriptionandroid.UiEvent
-import com.konashevich.transcriptionandroid.data.ImportedAudio
-import com.konashevich.transcriptionandroid.data.ListenMode
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.konashevich.pressscribe.MainUiState
+import com.konashevich.pressscribe.MainViewModel
+import com.konashevich.pressscribe.UiEvent
+import com.konashevich.pressscribe.data.ImportedAudio
+import com.konashevich.pressscribe.data.ListenMode
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -86,24 +109,53 @@ fun TranscriptionApp(
     val snackbarHostState = remember { SnackbarHostState() }
     val clipboardManager = LocalClipboardManager.current
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val appHaptics = remember(context) { AppHaptics(context) }
 
     var showSettings by rememberSaveable { mutableStateOf(false) }
     var showAbout by rememberSaveable { mutableStateOf(false) }
     var menuExpanded by remember { mutableStateOf(false) }
     var importedExpanded by rememberSaveable(state.importedAudio?.file?.absolutePath) { mutableStateOf(false) }
+    var previousRecordingState by remember { mutableStateOf(state.isRecording) }
+    var hasRecordPermission by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.RECORD_AUDIO,
+            ) == PackageManager.PERMISSION_GRANTED,
+        )
+    }
 
     val recordPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission(),
     ) { granted ->
+        hasRecordPermission = granted
         if (granted && state.settings.listenMode == ListenMode.TOGGLE) {
             viewModel.startRecording()
         }
     }
 
-    val hasRecordPermission = ContextCompat.checkSelfPermission(
-        context,
-        Manifest.permission.RECORD_AUDIO,
-    ) == PackageManager.PERMISSION_GRANTED
+    LaunchedEffect(state.isRecording, state.settings.vibrationDurationMs) {
+        if (state.isRecording != previousRecordingState) {
+            appHaptics.vibrate(state.settings.vibrationDurationMs)
+            previousRecordingState = state.isRecording
+        }
+    }
+
+    DisposableEffect(lifecycleOwner, context) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                hasRecordPermission = ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.RECORD_AUDIO,
+                ) == PackageManager.PERMISSION_GRANTED
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
 
     val openSessionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument(),
@@ -144,17 +196,24 @@ fun TranscriptionApp(
     LaunchedEffect(viewModel) {
         viewModel.events.collect { event ->
             when (event) {
-                is UiEvent.Snackbar -> snackbarHostState.showSnackbar(event.message)
+                is UiEvent.Snackbar -> {
+                    snackbarHostState.currentSnackbarData?.dismiss()
+                    val dismissJob = launch {
+                        delay(2700)
+                        snackbarHostState.currentSnackbarData?.dismiss()
+                    }
+                    snackbarHostState.showSnackbar(
+                        message = event.message,
+                        duration = SnackbarDuration.Indefinite,
+                    )
+                    dismissJob.cancel()
+                }
             }
         }
     }
 
     val ensureRecordPermission = {
-        if (ContextCompat.checkSelfPermission(
-                context,
-                Manifest.permission.RECORD_AUDIO,
-            ) == PackageManager.PERMISSION_GRANTED
-        ) {
+        if (hasRecordPermission) {
             viewModel.startRecording()
         } else {
             recordPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
@@ -172,146 +231,154 @@ fun TranscriptionApp(
         }
     }
 
-    Scaffold(
-        modifier = Modifier.fillMaxSize(),
-        topBar = {
-            TopAppBar(
-                title = {
-                    Column {
-                        Text("Listen & Polish", maxLines = 1)
-                        Text(
-                            text = state.settings.transcriptionService.label,
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
-                    }
-                },
-                actions = {
-                    IconButton(onClick = { showSettings = true }) {
-                        Icon(Icons.Filled.Settings, contentDescription = "Settings")
-                    }
-                    IconButton(onClick = { menuExpanded = true }) {
-                        Icon(Icons.Filled.MoreVert, contentDescription = "Menu")
-                    }
-                    DropdownMenu(
-                        expanded = menuExpanded,
-                        onDismissRequest = { menuExpanded = false },
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text("Open Session") },
-                            onClick = {
-                                menuExpanded = false
-                                openSessionLauncher.launch(arrayOf("application/json"))
-                            },
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Save Session") },
-                            onClick = {
-                                menuExpanded = false
-                                saveSessionLauncher.launch(viewModel.suggestedSessionFileName())
-                            },
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Open Audio") },
-                            enabled = !state.isTranscribing && !state.isImportingAudio,
-                            onClick = {
-                                menuExpanded = false
-                                openAudioLauncher.launch(arrayOf("audio/*"))
-                            },
-                        )
-                        DropdownMenuItem(
-                            text = { Text("About") },
-                            leadingIcon = { Icon(Icons.Filled.Info, contentDescription = null) },
-                            onClick = {
-                                menuExpanded = false
-                                showAbout = true
-                            },
-                        )
-                    }
-                },
-            )
-        },
-        snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
-    ) { innerPadding ->
-        BoxWithConstraints(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding),
-        ) {
-            val wideLayout = maxWidth >= 900.dp
-
-            Column(
+    Box(modifier = Modifier.fillMaxSize()) {
+        Scaffold(
+            modifier = Modifier.fillMaxSize(),
+            topBar = {
+                TopAppBar(
+                    title = {
+                        Column {
+                            Text("PressScribe", maxLines = 1)
+                            Text(
+                                text = state.settings.transcriptionService.label,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                    },
+                    actions = {
+                        IconButton(onClick = { showSettings = true }) {
+                            Icon(Icons.Filled.Settings, contentDescription = "Settings")
+                        }
+                        IconButton(onClick = { menuExpanded = true }) {
+                            Icon(Icons.Filled.MoreVert, contentDescription = "Menu")
+                        }
+                        DropdownMenu(
+                            expanded = menuExpanded,
+                            onDismissRequest = { menuExpanded = false },
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Open Session") },
+                                onClick = {
+                                    menuExpanded = false
+                                    openSessionLauncher.launch(arrayOf("application/json"))
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Save Session") },
+                                onClick = {
+                                    menuExpanded = false
+                                    saveSessionLauncher.launch(viewModel.suggestedSessionFileName())
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Open Audio") },
+                                enabled = !state.isTranscribing && !state.isImportingAudio,
+                                onClick = {
+                                    menuExpanded = false
+                                    openAudioLauncher.launch(arrayOf("audio/*"))
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("About") },
+                                leadingIcon = { Icon(Icons.Filled.Info, contentDescription = null) },
+                                onClick = {
+                                    menuExpanded = false
+                                    showAbout = true
+                                },
+                            )
+                        }
+                    },
+                )
+            },
+            snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
+        ) { innerPadding ->
+            BoxWithConstraints(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                    .padding(innerPadding),
             ) {
-                state.importedAudio?.let { importedAudio ->
-                    ImportedAudioCard(
-                        importedAudio = importedAudio,
-                        expanded = importedExpanded,
-                        isBusy = state.isTranscribing || state.isImportingAudio,
-                        onExpandedChange = { importedExpanded = it },
-                        onTranscribe = viewModel::transcribeImportedAudio,
-                        onSave = {
-                            saveImportedAudioLauncher.launch(
-                                CreateDocumentRequest(
-                                    mimeType = importedAudio.mimeType,
-                                    displayName = importedAudio.displayName,
-                                ),
-                            )
-                        },
-                        onClear = viewModel::clearImportedAudio,
-                    )
-                }
+                val wideLayout = maxWidth >= 900.dp
 
-                if (wideLayout) {
-                    Row(
-                        modifier = Modifier.fillMaxSize(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        RawEditorPanel(
-                            modifier = Modifier.weight(1.15f),
-                            state = state,
-                            viewModel = viewModel,
-                            hasRecordPermission = hasRecordPermission,
-                            onEnsurePermission = ensureRecordPermission,
-                            onRequestPermission = { recordPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO) },
-                            clipboardText = { clipboardManager.setText(AnnotatedString(state.rawTextValue.text)) },
-                        )
-                        PolishedEditorPanel(
-                            modifier = Modifier.weight(0.85f),
-                            state = state,
-                            viewModel = viewModel,
-                            clipboardText = { clipboardManager.setText(AnnotatedString(state.polishedTextValue.text)) },
-                            shareText = sharePolishedText,
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    state.importedAudio?.let { importedAudio ->
+                        ImportedAudioCard(
+                            importedAudio = importedAudio,
+                            expanded = importedExpanded,
+                            isBusy = state.isTranscribing || state.isImportingAudio,
+                            onExpandedChange = { importedExpanded = it },
+                            onTranscribe = viewModel::transcribeImportedAudio,
+                            onSave = {
+                                saveImportedAudioLauncher.launch(
+                                    CreateDocumentRequest(
+                                        mimeType = importedAudio.mimeType,
+                                        displayName = importedAudio.displayName,
+                                    ),
+                                )
+                            },
+                            onClear = viewModel::clearImportedAudio,
                         )
                     }
-                } else {
-                    Column(
-                        modifier = Modifier.fillMaxSize(),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        RawEditorPanel(
-                            modifier = Modifier.weight(1.2f),
-                            state = state,
-                            viewModel = viewModel,
-                            hasRecordPermission = hasRecordPermission,
-                            onEnsurePermission = ensureRecordPermission,
-                            onRequestPermission = { recordPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO) },
-                            clipboardText = { clipboardManager.setText(AnnotatedString(state.rawTextValue.text)) },
-                        )
-                        PolishedEditorPanel(
-                            modifier = Modifier.weight(0.8f),
-                            state = state,
-                            viewModel = viewModel,
-                            clipboardText = { clipboardManager.setText(AnnotatedString(state.polishedTextValue.text)) },
-                            shareText = sharePolishedText,
-                        )
+
+                    if (wideLayout) {
+                        Row(
+                            modifier = Modifier.fillMaxSize(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            RawEditorPanel(
+                                modifier = Modifier.weight(1f),
+                                state = state,
+                                viewModel = viewModel,
+                                hasRecordPermission = hasRecordPermission,
+                                onEnsurePermission = ensureRecordPermission,
+                                onRequestPermission = { recordPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO) },
+                                clipboardText = { clipboardManager.setText(AnnotatedString(state.rawTextValue.text)) },
+                            )
+                            PolishedEditorPanel(
+                                modifier = Modifier.weight(1f),
+                                state = state,
+                                viewModel = viewModel,
+                                clipboardText = { clipboardManager.setText(AnnotatedString(state.polishedTextValue.text)) },
+                                shareText = sharePolishedText,
+                            )
+                        }
+                    } else {
+                        Column(
+                            modifier = Modifier.fillMaxSize(),
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            RawEditorPanel(
+                                modifier = Modifier.weight(1f),
+                                state = state,
+                                viewModel = viewModel,
+                                hasRecordPermission = hasRecordPermission,
+                                onEnsurePermission = ensureRecordPermission,
+                                onRequestPermission = { recordPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO) },
+                                clipboardText = { clipboardManager.setText(AnnotatedString(state.rawTextValue.text)) },
+                            )
+                            PolishedEditorPanel(
+                                modifier = Modifier.weight(1f),
+                                state = state,
+                                viewModel = viewModel,
+                                clipboardText = { clipboardManager.setText(AnnotatedString(state.polishedTextValue.text)) },
+                                shareText = sharePolishedText,
+                            )
+                        }
                     }
                 }
             }
         }
+
+        ListeningGlowOverlay(
+            active = state.isRecording,
+            level = state.listeningLevel,
+            modifier = Modifier.fillMaxSize(),
+        )
     }
 
     if (showSettings) {
@@ -330,6 +397,7 @@ fun TranscriptionApp(
             onServerPortChanged = viewModel::updateServerPort,
             onServerPathChanged = viewModel::updateServerPath,
             onServerTimeoutChanged = viewModel::updateServerTimeoutSeconds,
+            onVibrationDurationChanged = viewModel::updateVibrationDurationMs,
             onImportSettings = {
                 importSettingsLauncher.launch(arrayOf("application/json"))
             },
@@ -347,10 +415,136 @@ fun TranscriptionApp(
             title = { Text("About") },
             text = {
                 Text(
-                    "Android port of Listen & Polish with the same raw/polished workflow, " +
+                    "Android edition of PressScribe with the same raw/polished workflow, " +
                         "Gemini polishing, Gemini or self-hosted transcription, and audio sharing from other apps.",
                 )
             },
+        )
+    }
+}
+
+@Composable
+private fun ListeningGlowOverlay(
+    active: Boolean,
+    level: Float,
+    modifier: Modifier = Modifier,
+) {
+    val visibility by animateFloatAsState(
+        targetValue = if (active) 1f else 0f,
+        animationSpec = tween(durationMillis = 320),
+        label = "listening_glow_visibility",
+    )
+    if (visibility <= 0.001f) {
+        return
+    }
+
+    val transition = rememberInfiniteTransition(label = "listening_glow")
+    val breathing by transition.animateFloat(
+        initialValue = 0.92f,
+        targetValue = 1.08f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 2100, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "listening_glow_breathing",
+    )
+    val shimmer by transition.animateFloat(
+        initialValue = 0.94f,
+        targetValue = 1.08f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1700, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "listening_glow_shimmer",
+    )
+
+    Canvas(modifier = modifier) {
+        val speechBoost = (0.18f + (level.coerceIn(0f, 1f) * 0.82f)) * visibility
+        val outerStroke = 18.dp.toPx() * breathing
+        val middleStroke = 11.dp.toPx() * shimmer
+        val innerStroke = 8.dp.toPx()
+        val cornerRadius = 24.dp.toPx()
+        val sideGlowWidth = 18.dp.toPx() + (18.dp.toPx() * level)
+        val topGlowHeight = 12.dp.toPx() + (10.dp.toPx() * level)
+        val bottomGlowHeight = 18.dp.toPx() + (18.dp.toPx() * level)
+        val borderBrush = Brush.sweepGradient(
+            colors = ListeningGlowColors,
+            center = center,
+        )
+
+        drawRoundRect(
+            brush = borderBrush,
+            topLeft = Offset.Zero,
+            size = size,
+            cornerRadius = CornerRadius(cornerRadius, cornerRadius),
+            style = Stroke(width = outerStroke),
+            alpha = 0.12f * speechBoost,
+            blendMode = BlendMode.Screen,
+        )
+        drawRoundRect(
+            brush = borderBrush,
+            topLeft = Offset.Zero,
+            size = size,
+            cornerRadius = CornerRadius(cornerRadius, cornerRadius),
+            style = Stroke(width = middleStroke),
+            alpha = 0.20f * speechBoost,
+            blendMode = BlendMode.Screen,
+        )
+        drawRoundRect(
+            brush = borderBrush,
+            topLeft = Offset.Zero,
+            size = size,
+            cornerRadius = CornerRadius(cornerRadius, cornerRadius),
+            style = Stroke(width = innerStroke),
+            alpha = 0.45f * speechBoost,
+            blendMode = BlendMode.Screen,
+        )
+
+        drawRect(
+            brush = Brush.horizontalGradient(
+                colors = listOf(
+                    Color(0xCC2BD6FF).copy(alpha = 0.38f * speechBoost),
+                    Color.Transparent,
+                ),
+            ),
+            topLeft = Offset.Zero,
+            size = Size(sideGlowWidth, size.height),
+            blendMode = BlendMode.Screen,
+        )
+        drawRect(
+            brush = Brush.horizontalGradient(
+                colors = listOf(
+                    Color.Transparent,
+                    Color(0xCC7A5CFF).copy(alpha = 0.34f * speechBoost),
+                ),
+            ),
+            topLeft = Offset(size.width - sideGlowWidth, 0f),
+            size = Size(sideGlowWidth, size.height),
+            blendMode = BlendMode.Screen,
+        )
+        drawRect(
+            brush = Brush.verticalGradient(
+                colors = listOf(
+                    Color(0x9926D8FF).copy(alpha = 0.22f * speechBoost),
+                    Color.Transparent,
+                ),
+            ),
+            topLeft = Offset.Zero,
+            size = Size(size.width, topGlowHeight),
+            blendMode = BlendMode.Screen,
+        )
+        drawRect(
+            brush = Brush.verticalGradient(
+                colors = listOf(
+                    Color.Transparent,
+                    Color(0xCC00C084).copy(alpha = 0.18f * speechBoost),
+                    Color(0xDD2BD6FF).copy(alpha = 0.42f * speechBoost),
+                    Color(0xDDFF7A59).copy(alpha = 0.22f * speechBoost),
+                ),
+            ),
+            topLeft = Offset(0f, size.height - bottomGlowHeight),
+            size = Size(size.width, bottomGlowHeight),
+            blendMode = BlendMode.Screen,
         )
     }
 }
@@ -666,3 +860,13 @@ private fun ImportedAudioCard(
         }
     }
 }
+
+private val ListeningGlowColors = listOf(
+    Color(0xFF0078D7),
+    Color(0xFF26D8FF),
+    Color(0xFF6CEAFF),
+    Color(0xFF7A5CFF),
+    Color(0xFF00C084),
+    Color(0xFFFF7A59),
+    Color(0xFF0078D7),
+)

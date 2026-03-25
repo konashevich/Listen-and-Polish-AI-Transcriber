@@ -1,4 +1,4 @@
-package com.konashevich.transcriptionandroid.audio
+package com.konashevich.pressscribe.audio
 
 import android.content.Context
 import android.os.Build
@@ -60,5 +60,18 @@ class AudioRecorder(
         outputFile?.delete()
         mediaRecorder = null
         outputFile = null
+    }
+
+    fun currentLevel(): Float {
+        val recorder = mediaRecorder ?: return 0f
+        val amplitude = runCatching { recorder.maxAmplitude }.getOrDefault(0)
+        if (amplitude <= 0) {
+            return 0f
+        }
+
+        // Smooth the meter so quiet speech still lights the edge without clipping the effect.
+        return (amplitude / 32767f)
+            .coerceIn(0f, 1f)
+            .let { kotlin.math.sqrt(it) }
     }
 }

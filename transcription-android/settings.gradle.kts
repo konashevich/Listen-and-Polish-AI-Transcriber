@@ -14,6 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "transcription-android"
+rootProject.name = "PressScribe"
 include(":app")
-

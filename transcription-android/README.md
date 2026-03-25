@@ -1,6 +1,6 @@
-# Listen & Polish Android
+# PressScribe Android
 
-Android app based on the desktop `Listen & Polish` workflow.
+Android app based on the desktop `PressScribe` workflow.
 
 ## Included
 
@@ -37,7 +37,7 @@ Debug APK output:
 ## Share flow
 
 1. In another Android app, use `Share`.
-2. Choose `Listen & Polish`.
+2. Choose `PressScribe`.
 3. The shared audio is imported into the app and auto-transcribed with the currently selected transcription service.
 
 ## Notes
@@ -46,4 +46,3 @@ Debug APK output:
 - Self-hosted ASR expects a multipart `audio` upload. The Android client accepts responses shaped like the desktop app:
   - `{"transcription":{"parsed_text":"..."}}`
   - or `{"text":"..."}`
-

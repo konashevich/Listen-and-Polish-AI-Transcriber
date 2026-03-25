@@ -1,11 +1,12 @@
-package com.konashevich.transcriptionandroid.ui.theme
+package com.konashevich.pressscribe.ui.theme
 
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
-import com.konashevich.transcriptionandroid.data.ThemeMode
+import com.konashevich.pressscribe.data.ThemeMode
 
 private val DarkColors = darkColorScheme(
     primary = Color(0xFF0078D7),
@@ -36,13 +37,18 @@ private val LightColors = lightColorScheme(
 )
 
 @Composable
-fun ListenAndPolishTheme(
+fun PressScribeTheme(
     themeMode: ThemeMode,
     content: @Composable () -> Unit,
 ) {
+    val darkTheme = when (themeMode) {
+        ThemeMode.AUTO -> isSystemInDarkTheme()
+        ThemeMode.DARK -> true
+        ThemeMode.LIGHT -> false
+    }
+
     MaterialTheme(
-        colorScheme = if (themeMode == ThemeMode.LIGHT) LightColors else DarkColors,
+        colorScheme = if (darkTheme) DarkColors else LightColors,
         content = content,
     )
 }
-

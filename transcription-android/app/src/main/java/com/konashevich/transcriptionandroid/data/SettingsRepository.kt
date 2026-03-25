@@ -1,4 +1,4 @@
-package com.konashevich.transcriptionandroid.data
+package com.konashevich.pressscribe.data
 
 import android.content.Context
 import androidx.datastore.preferences.core.edit
@@ -14,7 +14,7 @@ class SettingsRepository(private val context: Context) {
 
     val settingsFlow: Flow<AppSettings> = context.dataStore.data.map { prefs ->
         AppSettings(
-            themeMode = prefs[Keys.THEME_MODE].toEnumOrDefault(ThemeMode.DARK),
+            themeMode = prefs[Keys.THEME_MODE].toEnumOrDefault(ThemeMode.AUTO),
             fontSize = prefs[Keys.FONT_SIZE].toEnumOrDefault(FontSizeOption.MEDIUM),
             listenMode = prefs[Keys.LISTEN_MODE].toEnumOrDefault(ListenMode.HOLD),
             transcriptionService = prefs[Keys.TRANSCRIPTION_SERVICE]
@@ -27,6 +27,7 @@ class SettingsRepository(private val context: Context) {
             serverPort = prefs[Keys.SERVER_PORT].orEmpty().ifBlank { "8711" },
             serverPath = prefs[Keys.SERVER_PATH].orEmpty().ifBlank { "/transcribe" },
             serverTimeoutSeconds = prefs[Keys.SERVER_TIMEOUT_SECONDS] ?: 360,
+            vibrationDurationMs = prefs[Keys.VIBRATION_DURATION_MS] ?: DEFAULT_VIBRATION_DURATION_MS,
         )
     }
 
@@ -59,6 +60,12 @@ class SettingsRepository(private val context: Context) {
         }
     }
 
+    suspend fun updateVibrationDurationMs(value: Int) {
+        context.dataStore.edit { prefs ->
+            prefs[Keys.VIBRATION_DURATION_MS] = value.coerceAtLeast(0)
+        }
+    }
+
     suspend fun importSettings(patch: SettingsImportPatch) {
         context.dataStore.edit { prefs ->
             patch.themeMode?.let { prefs[Keys.THEME_MODE] = it.name }
@@ -73,6 +80,7 @@ class SettingsRepository(private val context: Context) {
             patch.serverPort?.let { prefs[Keys.SERVER_PORT] = it }
             patch.serverPath?.let { prefs[Keys.SERVER_PATH] = it }
             patch.serverTimeoutSeconds?.let { prefs[Keys.SERVER_TIMEOUT_SECONDS] = it.coerceAtLeast(1) }
+            patch.vibrationDurationMs?.let { prefs[Keys.VIBRATION_DURATION_MS] = it.coerceAtLeast(0) }
         }
     }
 
@@ -98,6 +106,7 @@ class SettingsRepository(private val context: Context) {
         val SERVER_PORT = stringPreferencesKey("server_port")
         val SERVER_PATH = stringPreferencesKey("server_path")
         val SERVER_TIMEOUT_SECONDS = intPreferencesKey("server_timeout_seconds")
+        val VIBRATION_DURATION_MS = intPreferencesKey("vibration_duration_ms")
     }
 }
 

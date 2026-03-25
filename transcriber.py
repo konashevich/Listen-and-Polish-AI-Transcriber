@@ -307,7 +307,7 @@ class RecordButton(QPushButton):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Listen & Polish - AI Transcriber")
+        self.setWindowTitle("PressScribe")
         self.setGeometry(100, 100, 900, 600)
 
         # --- Set Window Icon ---
@@ -1465,13 +1465,13 @@ class MainWindow(QMainWindow):
 
     def show_about_dialog(self):
         about_text = (
-            f"<p><b>LISTEN & POLISH - AI Transcriber</b></p>"
+            f"<p><b>PressScribe</b></p>"
             f"<p>Version: 1.05</p>"
             f"<p>Author: Oleksii Konashevych</p>"
-            f"<p>GitHub: <a href='https://github.com/konashevich/Listen-and-Polish-AI-Transcriber'>https://github.com/konashevich/Listen-and-Polish-AI-Transcriber</a></p>"
+            f"<p>GitHub: <a href='https://github.com/konashevich/PressScribe-AI-Audio-Notes'>https://github.com/konashevich/PressScribe-AI-Audio-Notes</a></p>"
             f"<p>License: Open Source (MIT)</p>"
         )
-        QMessageBox.about(self, "About Smart AI Recorder Transcriber", about_text)
+        QMessageBox.about(self, "About PressScribe", about_text)
 
 def check_dependencies():
     """Checks for necessary system dependencies (flac and xclip)."""

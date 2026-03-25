@@ -1,4 +1,4 @@
-package com.konashevich.transcriptionandroid.ui
+package com.konashevich.pressscribe.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.ColumnScope
@@ -35,12 +35,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
-import com.konashevich.transcriptionandroid.data.AppSettings
-import com.konashevich.transcriptionandroid.data.FontSizeOption
-import com.konashevich.transcriptionandroid.data.ListenMode
-import com.konashevich.transcriptionandroid.data.ServerScheme
-import com.konashevich.transcriptionandroid.data.ThemeMode
-import com.konashevich.transcriptionandroid.data.TranscriptionService
+import com.konashevich.pressscribe.data.AppSettings
+import com.konashevich.pressscribe.data.FontSizeOption
+import com.konashevich.pressscribe.data.ListenMode
+import com.konashevich.pressscribe.data.ServerScheme
+import com.konashevich.pressscribe.data.ThemeMode
+import com.konashevich.pressscribe.data.TranscriptionService
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -59,10 +59,14 @@ fun SettingsSheet(
     onServerPortChanged: (String) -> Unit,
     onServerPathChanged: (String) -> Unit,
     onServerTimeoutChanged: (String) -> Unit,
+    onVibrationDurationChanged: (String) -> Unit,
     onImportSettings: () -> Unit,
 ) {
     var timeoutText by rememberSaveable(settings.serverTimeoutSeconds) {
         mutableStateOf(settings.serverTimeoutSeconds.toString())
+    }
+    var vibrationText by rememberSaveable(settings.vibrationDurationMs) {
+        mutableStateOf(settings.vibrationDurationMs.toString())
     }
 
     ModalBottomSheet(
@@ -118,6 +122,26 @@ fun SettingsSheet(
                     selected = settings.listenMode,
                     labelOf = { it.label },
                     onSelected = onListenModeChanged,
+                )
+            }
+
+            SettingsSection("Haptics") {
+                Text(
+                    text = "Vibration is used when recording starts and stops. Set 0 to disable it.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                OutlinedTextField(
+                    modifier = Modifier.fillMaxWidth(),
+                    value = vibrationText,
+                    onValueChange = { newValue ->
+                        val filtered = newValue.filter(Char::isDigit)
+                        vibrationText = filtered
+                        if (filtered.isNotEmpty()) {
+                            onVibrationDurationChanged(filtered)
+                        }
+                    },
+                    label = { Text("Vibration (ms)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 )
             }
 

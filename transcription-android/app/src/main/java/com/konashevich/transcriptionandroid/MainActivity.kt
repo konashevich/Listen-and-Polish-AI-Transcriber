@@ -1,4 +1,4 @@
-package com.konashevich.transcriptionandroid
+package com.konashevich.pressscribe
 
 import android.content.Intent
 import android.net.Uri
@@ -8,8 +8,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.konashevich.transcriptionandroid.ui.TranscriptionApp
-import com.konashevich.transcriptionandroid.ui.theme.ListenAndPolishTheme
+import com.konashevich.pressscribe.ui.TranscriptionApp
+import com.konashevich.pressscribe.ui.theme.PressScribeTheme
 
 class MainActivity : ComponentActivity() {
     private val viewModel: MainViewModel by viewModels()
@@ -19,7 +19,7 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             val state = viewModel.uiState.collectAsStateWithLifecycle()
-            ListenAndPolishTheme(themeMode = state.value.settings.themeMode) {
+            PressScribeTheme(themeMode = state.value.settings.themeMode) {
                 TranscriptionApp(
                     state = state.value,
                     viewModel = viewModel,

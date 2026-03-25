@@ -1,4 +1,4 @@
-package com.konashevich.transcriptionandroid.data
+package com.konashevich.pressscribe.data
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -281,4 +281,3 @@ private data class UploadedGeminiFile(
     val uri: String,
     val mimeType: String,
 )
-
