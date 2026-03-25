@@ -29,6 +29,11 @@ enum class ListenMode(val label: String) {
     TOGGLE("Tap to Toggle"),
 }
 
+enum class VolumeButtonMode(val label: String) {
+    HOLD_ANY("Hold either volume button"),
+    TOGGLE_SPLIT("Vol+ start, Vol- stop"),
+}
+
 enum class TranscriptionService(val label: String) {
     GEMINI("Gemini (Google)"),
     SELF_HOSTED("Self-hosted ASR"),
@@ -43,6 +48,7 @@ data class AppSettings(
     val themeMode: ThemeMode = ThemeMode.AUTO,
     val fontSize: FontSizeOption = FontSizeOption.MEDIUM,
     val listenMode: ListenMode = ListenMode.HOLD,
+    val volumeButtonMode: VolumeButtonMode = VolumeButtonMode.HOLD_ANY,
     val transcriptionService: TranscriptionService = TranscriptionService.GEMINI,
     val geminiApiKey: String = "",
     val geminiModel: String = DEFAULT_GEMINI_MODEL,

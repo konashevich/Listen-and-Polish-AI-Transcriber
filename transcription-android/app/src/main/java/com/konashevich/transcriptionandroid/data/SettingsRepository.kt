@@ -17,6 +17,7 @@ class SettingsRepository(private val context: Context) {
             themeMode = prefs[Keys.THEME_MODE].toEnumOrDefault(ThemeMode.AUTO),
             fontSize = prefs[Keys.FONT_SIZE].toEnumOrDefault(FontSizeOption.MEDIUM),
             listenMode = prefs[Keys.LISTEN_MODE].toEnumOrDefault(ListenMode.HOLD),
+            volumeButtonMode = prefs[Keys.VOLUME_BUTTON_MODE].toEnumOrDefault(VolumeButtonMode.HOLD_ANY),
             transcriptionService = prefs[Keys.TRANSCRIPTION_SERVICE]
                 .toEnumOrDefault(TranscriptionService.GEMINI),
             geminiApiKey = prefs[Keys.GEMINI_API_KEY].orEmpty(),
@@ -36,6 +37,9 @@ class SettingsRepository(private val context: Context) {
     suspend fun updateFontSize(value: FontSizeOption) = editString(Keys.FONT_SIZE, value.name)
 
     suspend fun updateListenMode(value: ListenMode) = editString(Keys.LISTEN_MODE, value.name)
+
+    suspend fun updateVolumeButtonMode(value: VolumeButtonMode) =
+        editString(Keys.VOLUME_BUTTON_MODE, value.name)
 
     suspend fun updateTranscriptionService(value: TranscriptionService) =
         editString(Keys.TRANSCRIPTION_SERVICE, value.name)
@@ -71,6 +75,7 @@ class SettingsRepository(private val context: Context) {
             patch.themeMode?.let { prefs[Keys.THEME_MODE] = it.name }
             patch.fontSize?.let { prefs[Keys.FONT_SIZE] = it.name }
             patch.listenMode?.let { prefs[Keys.LISTEN_MODE] = it.name }
+            patch.volumeButtonMode?.let { prefs[Keys.VOLUME_BUTTON_MODE] = it.name }
             patch.transcriptionService?.let { prefs[Keys.TRANSCRIPTION_SERVICE] = it.name }
             patch.geminiApiKey?.let { prefs[Keys.GEMINI_API_KEY] = it }
             patch.geminiModel?.let { prefs[Keys.GEMINI_MODEL] = it.ifBlank { DEFAULT_GEMINI_MODEL } }
@@ -97,6 +102,7 @@ class SettingsRepository(private val context: Context) {
         val THEME_MODE = stringPreferencesKey("theme_mode")
         val FONT_SIZE = stringPreferencesKey("font_size")
         val LISTEN_MODE = stringPreferencesKey("listen_mode")
+        val VOLUME_BUTTON_MODE = stringPreferencesKey("volume_button_mode")
         val TRANSCRIPTION_SERVICE = stringPreferencesKey("transcription_service")
         val GEMINI_API_KEY = stringPreferencesKey("gemini_api_key")
         val GEMINI_MODEL = stringPreferencesKey("gemini_model")

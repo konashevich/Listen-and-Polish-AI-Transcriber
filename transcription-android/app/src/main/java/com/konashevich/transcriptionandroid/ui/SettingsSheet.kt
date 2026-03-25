@@ -41,6 +41,7 @@ import com.konashevich.pressscribe.data.ListenMode
 import com.konashevich.pressscribe.data.ServerScheme
 import com.konashevich.pressscribe.data.ThemeMode
 import com.konashevich.pressscribe.data.TranscriptionService
+import com.konashevich.pressscribe.data.VolumeButtonMode
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -50,6 +51,7 @@ fun SettingsSheet(
     onThemeChanged: (ThemeMode) -> Unit,
     onFontSizeChanged: (FontSizeOption) -> Unit,
     onListenModeChanged: (ListenMode) -> Unit,
+    onVolumeButtonModeChanged: (VolumeButtonMode) -> Unit,
     onTranscriptionServiceChanged: (TranscriptionService) -> Unit,
     onGeminiApiKeyChanged: (String) -> Unit,
     onGeminiModelChanged: (String) -> Unit,
@@ -122,6 +124,15 @@ fun SettingsSheet(
                     selected = settings.listenMode,
                     labelOf = { it.label },
                     onSelected = onListenModeChanged,
+                )
+            }
+
+            SettingsSection("Volume Buttons") {
+                ChoiceChips(
+                    values = VolumeButtonMode.entries.toList(),
+                    selected = settings.volumeButtonMode,
+                    labelOf = { it.label },
+                    onSelected = onVolumeButtonModeChanged,
                 )
             }
 

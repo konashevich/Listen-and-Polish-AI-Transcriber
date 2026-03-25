@@ -7,6 +7,7 @@ data class SettingsImportPatch(
     val themeMode: ThemeMode? = null,
     val fontSize: FontSizeOption? = null,
     val listenMode: ListenMode? = null,
+    val volumeButtonMode: VolumeButtonMode? = null,
     val transcriptionService: TranscriptionService? = null,
     val geminiApiKey: String? = null,
     val geminiModel: String? = null,
@@ -22,6 +23,7 @@ data class SettingsImportPatch(
         return themeMode != null ||
             fontSize != null ||
             listenMode != null ||
+            volumeButtonMode != null ||
             transcriptionService != null ||
             geminiApiKey != null ||
             geminiModel != null ||
@@ -45,6 +47,7 @@ fun parseDesktopSettingsImport(content: String): SettingsImportPatch {
         themeMode = root.optImportedString("theme")?.toThemeMode(),
         fontSize = root.optImportedValue("font_size").toFontSizeOption(),
         listenMode = root.optImportedString("listen_mode")?.toListenMode(),
+        volumeButtonMode = root.optImportedString("volume_button_mode")?.toVolumeButtonMode(),
         transcriptionService = root.optImportedString("transcription_service")?.toTranscriptionService(),
         geminiApiKey = root.optImportedString("api_key"),
         geminiModel = root.optImportedString("gemini_model")?.ifBlank { DEFAULT_GEMINI_MODEL },
@@ -101,6 +104,20 @@ private fun String.toListenMode(): ListenMode? {
     return when (normalized) {
         "click and hold", "press and hold", "hold" -> ListenMode.HOLD
         "click and stick", "tap to toggle", "toggle" -> ListenMode.TOGGLE
+        else -> null
+    }
+}
+
+private fun String.toVolumeButtonMode(): VolumeButtonMode? {
+    val normalized = trim().lowercase()
+    return when (normalized) {
+        "hold_any", "hold-any", "hold either", "hold_either", "hold either volume button",
+        "press and hold either volume button", "either", "either volume" -> VolumeButtonMode.HOLD_ANY
+
+        "toggle_split", "toggle-split", "split", "split toggle", "vol+ start, vol- stop",
+        "volume up start volume down stop", "volume up starts, volume down stops" ->
+            VolumeButtonMode.TOGGLE_SPLIT
+
         else -> null
     }
 }

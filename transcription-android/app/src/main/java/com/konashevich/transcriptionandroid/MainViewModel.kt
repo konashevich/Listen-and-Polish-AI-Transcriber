@@ -20,6 +20,7 @@ import com.konashevich.pressscribe.data.ServerScheme
 import com.konashevich.pressscribe.data.SettingsRepository
 import com.konashevich.pressscribe.data.ThemeMode
 import com.konashevich.pressscribe.data.TranscriptionService
+import com.konashevich.pressscribe.data.VolumeButtonMode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -385,6 +386,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun updateFontSize(value: FontSizeOption) = persist { settingsRepository.updateFontSize(value) }
 
     fun updateListenMode(value: ListenMode) = persist { settingsRepository.updateListenMode(value) }
+
+    fun updateVolumeButtonMode(value: VolumeButtonMode) =
+        persist { settingsRepository.updateVolumeButtonMode(value) }
 
     fun updateTranscriptionService(value: TranscriptionService) =
         persist { settingsRepository.updateTranscriptionService(value) }

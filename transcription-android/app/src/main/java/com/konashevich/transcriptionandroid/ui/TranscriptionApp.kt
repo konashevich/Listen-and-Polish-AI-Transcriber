@@ -388,6 +388,7 @@ fun TranscriptionApp(
             onThemeChanged = viewModel::updateThemeMode,
             onFontSizeChanged = viewModel::updateFontSize,
             onListenModeChanged = viewModel::updateListenMode,
+            onVolumeButtonModeChanged = viewModel::updateVolumeButtonMode,
             onTranscriptionServiceChanged = viewModel::updateTranscriptionService,
             onGeminiApiKeyChanged = viewModel::updateGeminiApiKey,
             onGeminiModelChanged = viewModel::updateGeminiModel,
