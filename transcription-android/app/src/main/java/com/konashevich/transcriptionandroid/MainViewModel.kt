@@ -14,7 +14,9 @@ import com.konashevich.pressscribe.data.FontSizeOption
 import com.konashevich.pressscribe.data.GeminiApiClient
 import com.konashevich.pressscribe.data.ImportedAudio
 import com.konashevich.pressscribe.data.ListenMode
+import com.konashevich.pressscribe.data.NotesRepository
 import com.konashevich.pressscribe.data.parseDesktopSettingsImport
+import com.konashevich.pressscribe.data.SavedNote
 import com.konashevich.pressscribe.data.SelfHostedAsrClient
 import com.konashevich.pressscribe.data.ServerScheme
 import com.konashevich.pressscribe.data.SettingsRepository
@@ -51,6 +53,10 @@ data class MainUiState(
     val isImportingAudio: Boolean = false,
     val isTranscribing: Boolean = false,
     val isPolishing: Boolean = false,
+    val savedNotes: List<SavedNote> = emptyList(),
+    val activeNoteId: String? = null,
+    val openedNoteId: String? = null,
+    val selectedNoteIds: Set<String> = emptySet(),
 )
 
 sealed interface UiEvent {
@@ -62,6 +68,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val geminiApiClient = GeminiApiClient()
     private val selfHostedAsrClient = SelfHostedAsrClient()
     private val audioRecorder = AudioRecorder(application)
+    private val notesRepository = NotesRepository(application)
 
     private val _uiState = MutableStateFlow(MainUiState())
     val uiState: StateFlow<MainUiState> = _uiState.asStateFlow()
@@ -77,6 +84,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _uiState.update { it.copy(settings = settings) }
             }
         }
+        loadSavedNotes()
     }
 
     fun updateRawText(value: TextFieldValue) {
@@ -85,6 +93,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun updatePolishedText(value: TextFieldValue) {
         _uiState.update { it.copy(polishedTextValue = value) }
+        val state = _uiState.value
+        if (state.activeNoteId != null && (state.settings.autoSaveNotes || state.openedNoteId != null)) {
+            saveCurrentPolishedNote(createIfMissing = false, showMessage = false)
+        }
     }
 
     fun clearRawText() {
@@ -92,7 +104,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun clearPolishedText() {
-        _uiState.update { it.copy(polishedTextValue = TextFieldValue("")) }
+        _uiState.update {
+            it.copy(
+                polishedTextValue = TextFieldValue(""),
+                activeNoteId = null,
+                openedNoteId = null,
+            )
+        }
     }
 
     fun clearAllText() {
@@ -100,6 +118,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             it.copy(
                 rawTextValue = TextFieldValue(""),
                 polishedTextValue = TextFieldValue(""),
+                activeNoteId = null,
+                openedNoteId = null,
             )
         }
     }
@@ -279,6 +299,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         ),
                     )
                 }
+                if (_uiState.value.settings.autoSaveNotes) {
+                    saveCurrentPolishedNote(createIfMissing = true, showMessage = false)
+                }
                 emitMessage("Polished text added.")
             } catch (error: Exception) {
                 emitMessage("Polish failed: ${error.message ?: error.javaClass.simpleName}")
@@ -425,11 +448,155 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         persist { settingsRepository.updateVibrationDurationMs(parsed) }
     }
 
+    fun updateAutoSaveNotes(value: Boolean) = persist { settingsRepository.updateAutoSaveNotes(value) }
+
+    fun manualSaveCurrentNote() {
+        saveCurrentPolishedNote(createIfMissing = true, showMessage = true)
+    }
+
+    fun openSavedNote(noteId: String) {
+        val note = _uiState.value.savedNotes.firstOrNull { it.id == noteId } ?: return
+        _uiState.update {
+            it.copy(
+                polishedTextValue = TextFieldValue(note.content, selection = TextRange(note.content.length)),
+                activeNoteId = note.id,
+                openedNoteId = note.id,
+                selectedNoteIds = emptySet(),
+            )
+        }
+    }
+
+    fun closeSavedNote() {
+        _uiState.update { it.copy(openedNoteId = null) }
+    }
+
+    fun toggleNoteSelection(noteId: String) {
+        _uiState.update { state ->
+            val selected = state.selectedNoteIds.toMutableSet()
+            if (!selected.add(noteId)) {
+                selected.remove(noteId)
+            }
+            state.copy(selectedNoteIds = selected)
+        }
+    }
+
+    fun clearNoteSelection() {
+        _uiState.update { it.copy(selectedNoteIds = emptySet()) }
+    }
+
+    fun deleteSavedNote(noteId: String) {
+        val nextNotes = _uiState.value.savedNotes.filterNot { it.id == noteId }
+        _uiState.update { state ->
+            state.copy(
+                savedNotes = nextNotes,
+                activeNoteId = state.activeNoteId.takeUnless { it == noteId },
+                openedNoteId = state.openedNoteId.takeUnless { it == noteId },
+                selectedNoteIds = state.selectedNoteIds - noteId,
+            )
+        }
+        persistSavedNotes(nextNotes)
+        emitMessage("Note deleted.")
+    }
+
+    fun deleteSelectedNotes() {
+        val selected = _uiState.value.selectedNoteIds
+        if (selected.isEmpty()) {
+            return
+        }
+        val nextNotes = _uiState.value.savedNotes.filterNot { it.id in selected }
+        _uiState.update { state ->
+            state.copy(
+                savedNotes = nextNotes,
+                activeNoteId = state.activeNoteId.takeUnless { it in selected },
+                openedNoteId = state.openedNoteId.takeUnless { it in selected },
+                selectedNoteIds = emptySet(),
+            )
+        }
+        persistSavedNotes(nextNotes)
+        emitMessage("Selected notes deleted.")
+    }
+
+    fun deleteAllSavedNotes() {
+        _uiState.update {
+            it.copy(
+                savedNotes = emptyList(),
+                activeNoteId = null,
+                openedNoteId = null,
+                selectedNoteIds = emptySet(),
+            )
+        }
+        persistSavedNotes(emptyList())
+        emitMessage("All notes deleted.")
+    }
+
     override fun onCleared() {
         levelMeterJob?.cancel()
         audioRecorder.stopAndDiscard()
         _uiState.value.importedAudio?.file?.delete()
         super.onCleared()
+    }
+
+    private fun loadSavedNotes() {
+        viewModelScope.launch {
+            runCatching { notesRepository.loadNotes() }
+                .onSuccess { notes ->
+                    _uiState.update { it.copy(savedNotes = notes) }
+                }
+                .onFailure { error ->
+                    emitMessage("Failed to load saved notes: ${error.message ?: error.javaClass.simpleName}")
+                }
+        }
+    }
+
+    private fun saveCurrentPolishedNote(
+        createIfMissing: Boolean,
+        showMessage: Boolean,
+    ) {
+        val content = _uiState.value.polishedTextValue.text.trim()
+        if (content.isBlank()) {
+            if (showMessage) {
+                emitMessage("Nothing to save.")
+            }
+            return
+        }
+
+        val state = _uiState.value
+        val activeNote = state.activeNoteId?.let { activeId ->
+            state.savedNotes.firstOrNull { it.id == activeId }
+        }
+
+        if (activeNote == null && !createIfMissing) {
+            return
+        }
+
+        val nextNote = if (activeNote == null) {
+            notesRepository.newNote(content)
+        } else {
+            notesRepository.updateNote(activeNote, content)
+        }
+
+        val nextNotes = (state.savedNotes.filterNot { it.id == nextNote.id } + nextNote)
+            .sortedByDescending { it.createdAt }
+
+        _uiState.update {
+            it.copy(
+                savedNotes = nextNotes,
+                activeNoteId = nextNote.id,
+            )
+        }
+        persistSavedNotes(nextNotes)
+        if (showMessage) {
+            emitMessage("Note saved.")
+        }
+    }
+
+    private fun persistSavedNotes(notes: List<SavedNote>) {
+        viewModelScope.launch {
+            runCatching { notesRepository.saveNotes(notes) }
+                .onFailure { error ->
+                    emitMessage("Failed to save notes: ${error.message ?: error.javaClass.simpleName}")
+                }
+        }
     }
 
     private fun startLevelMeter() {
@@ -561,6 +728,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     polishedText,
                     selection = TextRange(polishedText.length),
                 ),
+                activeNoteId = null,
+                openedNoteId = null,
+                selectedNoteIds = emptySet(),
             )
         }
     }

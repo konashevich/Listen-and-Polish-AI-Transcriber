@@ -1,6 +1,7 @@
 package com.konashevich.pressscribe.data
 
 import android.content.Context
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -29,6 +30,7 @@ class SettingsRepository(private val context: Context) {
             serverPath = prefs[Keys.SERVER_PATH].orEmpty().ifBlank { "/transcribe" },
             serverTimeoutSeconds = prefs[Keys.SERVER_TIMEOUT_SECONDS] ?: 360,
             vibrationDurationMs = prefs[Keys.VIBRATION_DURATION_MS] ?: DEFAULT_VIBRATION_DURATION_MS,
+            autoSaveNotes = prefs[Keys.AUTO_SAVE_NOTES] ?: true,
         )
     }
 
@@ -67,6 +69,12 @@ class SettingsRepository(private val context: Context) {
     suspend fun updateVibrationDurationMs(value: Int) {
         context.dataStore.edit { prefs ->
             prefs[Keys.VIBRATION_DURATION_MS] = value.coerceAtLeast(0)
+        }
+    }
+
+    suspend fun updateAutoSaveNotes(value: Boolean) {
+        context.dataStore.edit { prefs ->
+            prefs[Keys.AUTO_SAVE_NOTES] = value
         }
     }
 
@@ -113,6 +121,7 @@ class SettingsRepository(private val context: Context) {
         val SERVER_PATH = stringPreferencesKey("server_path")
         val SERVER_TIMEOUT_SECONDS = intPreferencesKey("server_timeout_seconds")
         val VIBRATION_DURATION_MS = intPreferencesKey("vibration_duration_ms")
+        val AUTO_SAVE_NOTES = booleanPreferencesKey("auto_save_notes")
     }
 }
 

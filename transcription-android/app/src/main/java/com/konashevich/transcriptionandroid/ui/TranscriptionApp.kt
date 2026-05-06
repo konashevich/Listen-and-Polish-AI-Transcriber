@@ -13,6 +13,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -29,8 +30,17 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Notes
 import androidx.compose.material.icons.filled.AutoFixHigh
+import androidx.compose.material.icons.filled.CheckBox
+import androidx.compose.material.icons.filled.CheckBoxOutlineBlank
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteSweep
@@ -69,6 +79,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -97,10 +108,11 @@ import com.konashevich.pressscribe.MainViewModel
 import com.konashevich.pressscribe.UiEvent
 import com.konashevich.pressscribe.data.ImportedAudio
 import com.konashevich.pressscribe.data.ListenMode
+import com.konashevich.pressscribe.data.SavedNote
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun TranscriptionApp(
     state: MainUiState,
@@ -111,12 +123,16 @@ fun TranscriptionApp(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val appHaptics = remember(context) { AppHaptics(context) }
+    val uiScope = rememberCoroutineScope()
+    val pagerState = rememberPagerState(pageCount = { 2 })
 
     var showSettings by rememberSaveable { mutableStateOf(false) }
     var showAbout by rememberSaveable { mutableStateOf(false) }
     var menuExpanded by remember { mutableStateOf(false) }
     var importedExpanded by rememberSaveable(state.importedAudio?.file?.absolutePath) { mutableStateOf(false) }
     var previousRecordingState by remember { mutableStateOf(state.isRecording) }
+    var wideScreen by rememberSaveable { mutableStateOf(EditorScreen.EDITOR) }
+    var pendingDelete by remember { mutableStateOf<DeleteRequest?>(null) }
     var hasRecordPermission by remember {
         mutableStateOf(
             ContextCompat.checkSelfPermission(
@@ -247,6 +263,20 @@ fun TranscriptionApp(
                         }
                     },
                     actions = {
+                        IconButton(
+                            onClick = {
+                                wideScreen = if (wideScreen == EditorScreen.NOTES) {
+                                    EditorScreen.EDITOR
+                                } else {
+                                    EditorScreen.NOTES
+                                }
+                                uiScope.launch {
+                                    pagerState.animateScrollToPage(if (pagerState.currentPage == 0) 1 else 0)
+                                }
+                            },
+                        ) {
+                            Icon(Icons.AutoMirrored.Filled.Notes, contentDescription = "Saved notes")
+                        }
                         IconButton(onClick = { showSettings = true }) {
                             Icon(Icons.Filled.Settings, contentDescription = "Settings")
                         }
@@ -326,48 +356,75 @@ fun TranscriptionApp(
                     }
 
                     if (wideLayout) {
-                        Row(
-                            modifier = Modifier.fillMaxSize(),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        ) {
-                            RawEditorPanel(
-                                modifier = Modifier.weight(1f),
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(onClick = { wideScreen = EditorScreen.EDITOR }) {
+                                Text("Editor")
+                            }
+                            Button(onClick = { wideScreen = EditorScreen.NOTES }) {
+                                Text("Saved Notes")
+                            }
+                        }
+                        if (wideScreen == EditorScreen.EDITOR) {
+                            EditorContent(
+                                modifier = Modifier.fillMaxSize(),
+                                wideLayout = true,
                                 state = state,
                                 viewModel = viewModel,
                                 hasRecordPermission = hasRecordPermission,
                                 onEnsurePermission = ensureRecordPermission,
                                 onRequestPermission = { recordPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO) },
-                                clipboardText = { clipboardManager.setText(AnnotatedString(state.rawTextValue.text)) },
+                                copyRawText = { clipboardManager.setText(AnnotatedString(state.rawTextValue.text)) },
+                                copyPolishedText = { clipboardManager.setText(AnnotatedString(state.polishedTextValue.text)) },
+                                sharePolishedText = sharePolishedText,
                             )
-                            PolishedEditorPanel(
-                                modifier = Modifier.weight(1f),
+                        } else {
+                            SavedNotesScreen(
+                                modifier = Modifier.fillMaxSize(),
                                 state = state,
-                                viewModel = viewModel,
-                                clipboardText = { clipboardManager.setText(AnnotatedString(state.polishedTextValue.text)) },
-                                shareText = sharePolishedText,
+                                onOpenNote = viewModel::openSavedNote,
+                                onCloseNote = viewModel::closeSavedNote,
+                                onUpdateNote = viewModel::updatePolishedText,
+                                onCopyNote = { text -> clipboardManager.setText(AnnotatedString(text)) },
+                                onDeleteNote = { pendingDelete = DeleteRequest.One(it) },
+                                onToggleSelected = viewModel::toggleNoteSelection,
+                                onClearSelection = viewModel::clearNoteSelection,
+                                onDeleteSelected = { pendingDelete = DeleteRequest.Selected },
+                                onDeleteAll = { pendingDelete = DeleteRequest.All },
                             )
                         }
                     } else {
-                        Column(
+                        HorizontalPager(
+                            state = pagerState,
                             modifier = Modifier.fillMaxSize(),
-                            verticalArrangement = Arrangement.spacedBy(12.dp),
-                        ) {
-                            RawEditorPanel(
-                                modifier = Modifier.weight(1f),
-                                state = state,
-                                viewModel = viewModel,
-                                hasRecordPermission = hasRecordPermission,
-                                onEnsurePermission = ensureRecordPermission,
-                                onRequestPermission = { recordPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO) },
-                                clipboardText = { clipboardManager.setText(AnnotatedString(state.rawTextValue.text)) },
-                            )
-                            PolishedEditorPanel(
-                                modifier = Modifier.weight(1f),
-                                state = state,
-                                viewModel = viewModel,
-                                clipboardText = { clipboardManager.setText(AnnotatedString(state.polishedTextValue.text)) },
-                                shareText = sharePolishedText,
-                            )
+                        ) { page ->
+                            if (page == 0) {
+                                EditorContent(
+                                    modifier = Modifier.fillMaxSize(),
+                                    wideLayout = false,
+                                    state = state,
+                                    viewModel = viewModel,
+                                    hasRecordPermission = hasRecordPermission,
+                                    onEnsurePermission = ensureRecordPermission,
+                                    onRequestPermission = { recordPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO) },
+                                    copyRawText = { clipboardManager.setText(AnnotatedString(state.rawTextValue.text)) },
+                                    copyPolishedText = { clipboardManager.setText(AnnotatedString(state.polishedTextValue.text)) },
+                                    sharePolishedText = sharePolishedText,
+                                )
+                            } else {
+                                SavedNotesScreen(
+                                    modifier = Modifier.fillMaxSize(),
+                                    state = state,
+                                    onOpenNote = viewModel::openSavedNote,
+                                    onCloseNote = viewModel::closeSavedNote,
+                                    onUpdateNote = viewModel::updatePolishedText,
+                                    onCopyNote = { text -> clipboardManager.setText(AnnotatedString(text)) },
+                                    onDeleteNote = { pendingDelete = DeleteRequest.One(it) },
+                                    onToggleSelected = viewModel::toggleNoteSelection,
+                                    onClearSelection = viewModel::clearNoteSelection,
+                                    onDeleteSelected = { pendingDelete = DeleteRequest.Selected },
+                                    onDeleteAll = { pendingDelete = DeleteRequest.All },
+                                )
+                            }
                         }
                     }
                 }
@@ -399,6 +456,7 @@ fun TranscriptionApp(
             onServerPathChanged = viewModel::updateServerPath,
             onServerTimeoutChanged = viewModel::updateServerTimeoutSeconds,
             onVibrationDurationChanged = viewModel::updateVibrationDurationMs,
+            onAutoSaveNotesChanged = viewModel::updateAutoSaveNotes,
             onImportSettings = {
                 importSettingsLauncher.launch(arrayOf("application/json"))
             },
@@ -422,6 +480,370 @@ fun TranscriptionApp(
             },
         )
     }
+
+    pendingDelete?.let { request ->
+        ConfirmDeleteDialog(
+            request = request,
+            selectedCount = state.selectedNoteIds.size,
+            onDismiss = { pendingDelete = null },
+            onConfirm = {
+                when (request) {
+                    DeleteRequest.All -> viewModel.deleteAllSavedNotes()
+                    is DeleteRequest.One -> viewModel.deleteSavedNote(request.noteId)
+                    DeleteRequest.Selected -> viewModel.deleteSelectedNotes()
+                }
+                pendingDelete = null
+            },
+        )
+    }
+}
+
+@Composable
+private fun EditorContent(
+    modifier: Modifier,
+    wideLayout: Boolean,
+    state: MainUiState,
+    viewModel: MainViewModel,
+    hasRecordPermission: Boolean,
+    onEnsurePermission: () -> Unit,
+    onRequestPermission: () -> Unit,
+    copyRawText: () -> Unit,
+    copyPolishedText: () -> Unit,
+    sharePolishedText: () -> Unit,
+) {
+    if (wideLayout) {
+        Row(
+            modifier = modifier,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            RawEditorPanel(
+                modifier = Modifier.weight(1f),
+                state = state,
+                viewModel = viewModel,
+                hasRecordPermission = hasRecordPermission,
+                onEnsurePermission = onEnsurePermission,
+                onRequestPermission = onRequestPermission,
+                clipboardText = copyRawText,
+            )
+            PolishedEditorPanel(
+                modifier = Modifier.weight(1f),
+                state = state,
+                viewModel = viewModel,
+                clipboardText = copyPolishedText,
+                shareText = sharePolishedText,
+            )
+        }
+    } else {
+        Column(
+            modifier = modifier,
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            RawEditorPanel(
+                modifier = Modifier.weight(1f),
+                state = state,
+                viewModel = viewModel,
+                hasRecordPermission = hasRecordPermission,
+                onEnsurePermission = onEnsurePermission,
+                onRequestPermission = onRequestPermission,
+                clipboardText = copyRawText,
+            )
+            PolishedEditorPanel(
+                modifier = Modifier.weight(1f),
+                state = state,
+                viewModel = viewModel,
+                clipboardText = copyPolishedText,
+                shareText = sharePolishedText,
+            )
+        }
+    }
+}
+
+@Composable
+private fun SavedNotesScreen(
+    modifier: Modifier,
+    state: MainUiState,
+    onOpenNote: (String) -> Unit,
+    onCloseNote: () -> Unit,
+    onUpdateNote: (TextFieldValue) -> Unit,
+    onCopyNote: (String) -> Unit,
+    onDeleteNote: (String) -> Unit,
+    onToggleSelected: (String) -> Unit,
+    onClearSelection: () -> Unit,
+    onDeleteSelected: () -> Unit,
+    onDeleteAll: () -> Unit,
+) {
+    val openedNote = state.openedNoteId?.let { openedId ->
+        state.savedNotes.firstOrNull { it.id == openedId }
+    }
+
+    if (openedNote != null) {
+        SavedNoteDetail(
+            modifier = modifier,
+            note = openedNote,
+            value = state.polishedTextValue,
+            onValueChange = onUpdateNote,
+            onBack = onCloseNote,
+            onCopy = { onCopyNote(state.polishedTextValue.text) },
+        )
+    } else {
+        SavedNotesList(
+            modifier = modifier,
+            notes = state.savedNotes,
+            selectedNoteIds = state.selectedNoteIds,
+            onOpenNote = onOpenNote,
+            onCopyNote = onCopyNote,
+            onDeleteNote = onDeleteNote,
+            onToggleSelected = onToggleSelected,
+            onClearSelection = onClearSelection,
+            onDeleteSelected = onDeleteSelected,
+            onDeleteAll = onDeleteAll,
+        )
+    }
+}
+
+@Composable
+private fun SavedNotesList(
+    modifier: Modifier,
+    notes: List<SavedNote>,
+    selectedNoteIds: Set<String>,
+    onOpenNote: (String) -> Unit,
+    onCopyNote: (String) -> Unit,
+    onDeleteNote: (String) -> Unit,
+    onToggleSelected: (String) -> Unit,
+    onClearSelection: () -> Unit,
+    onDeleteSelected: () -> Unit,
+    onDeleteAll: () -> Unit,
+) {
+    Card(modifier = modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "Saved Notes",
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                if (selectedNoteIds.isNotEmpty()) {
+                    ActionIconButton(
+                        icon = Icons.Filled.Close,
+                        contentDescription = "Clear selection",
+                        onClick = onClearSelection,
+                    )
+                    ActionIconButton(
+                        icon = Icons.Filled.DeleteSweep,
+                        contentDescription = "Delete selected notes",
+                        onClick = onDeleteSelected,
+                    )
+                }
+                ActionIconButton(
+                    icon = Icons.Filled.Delete,
+                    contentDescription = "Delete all notes",
+                    enabled = notes.isNotEmpty(),
+                    onClick = onDeleteAll,
+                )
+            }
+
+            if (notes.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = "No saved notes",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    items(notes, key = { it.id }) { note ->
+                        SavedNoteRow(
+                            note = note,
+                            selected = note.id in selectedNoteIds,
+                            onOpen = { onOpenNote(note.id) },
+                            onCopy = { onCopyNote(note.content) },
+                            onDelete = { onDeleteNote(note.id) },
+                            onToggleSelected = { onToggleSelected(note.id) },
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SavedNoteRow(
+    note: SavedNote,
+    selected: Boolean,
+    onOpen: () -> Unit,
+    onCopy: () -> Unit,
+    onDelete: () -> Unit,
+    onToggleSelected: () -> Unit,
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onOpen),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(10.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            ActionIconButton(
+                icon = if (selected) Icons.Filled.CheckBox else Icons.Filled.CheckBoxOutlineBlank,
+                contentDescription = if (selected) "Deselect note" else "Select note",
+                onClick = onToggleSelected,
+            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = note.title,
+                    style = MaterialTheme.typography.titleSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = note.content,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            ActionIconButton(
+                icon = Icons.Filled.ContentCopy,
+                contentDescription = "Copy note",
+                onClick = onCopy,
+            )
+            ActionIconButton(
+                icon = Icons.Filled.Delete,
+                contentDescription = "Delete note",
+                onClick = onDelete,
+            )
+        }
+    }
+}
+
+@Composable
+private fun SavedNoteDetail(
+    modifier: Modifier,
+    note: SavedNote,
+    value: TextFieldValue,
+    onValueChange: (TextFieldValue) -> Unit,
+    onBack: () -> Unit,
+    onCopy: () -> Unit,
+) {
+    Card(modifier = modifier.fillMaxWidth()) {
+        val editorTextStyle = MaterialTheme.typography.bodyLarge.copy(
+            fontSize = 16.sp,
+            lineHeight = 16.sp,
+            platformStyle = PlatformTextStyle(includeFontPadding = false),
+        )
+
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                ActionIconButton(
+                    icon = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = "Back to saved notes",
+                    onClick = onBack,
+                )
+                Text(
+                    text = note.title,
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.titleMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                ActionIconButton(
+                    icon = Icons.Filled.ContentCopy,
+                    contentDescription = "Copy note",
+                    onClick = onCopy,
+                )
+            }
+
+            OutlinedTextField(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .heightIn(min = 260.dp),
+                value = value,
+                onValueChange = onValueChange,
+                textStyle = editorTextStyle,
+                singleLine = false,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ConfirmDeleteDialog(
+    request: DeleteRequest,
+    selectedCount: Int,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    val title = when (request) {
+        DeleteRequest.All -> "Delete all notes?"
+        is DeleteRequest.One -> "Delete note?"
+        DeleteRequest.Selected -> "Delete selected notes?"
+    }
+    val message = when (request) {
+        DeleteRequest.All -> "This removes every saved note from this device."
+        is DeleteRequest.One -> "This removes the selected note from this device."
+        DeleteRequest.Selected -> "This removes $selectedCount selected notes from this device."
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(onClick = onConfirm) {
+                Text("Delete")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        },
+        title = { Text(title) },
+        text = { Text(message) },
+    )
+}
+
+private enum class EditorScreen {
+    EDITOR,
+    NOTES,
+}
+
+private sealed interface DeleteRequest {
+    data class One(val noteId: String) : DeleteRequest
+    data object Selected : DeleteRequest
+    data object All : DeleteRequest
 }
 
 @Composable
@@ -621,6 +1043,12 @@ private fun PolishedEditorPanel(
                 contentDescription = "Share polished text",
                 enabled = state.polishedTextValue.text.isNotBlank(),
                 onClick = shareText,
+            )
+            ActionIconButton(
+                icon = Icons.Filled.Save,
+                contentDescription = "Save polished text as note",
+                enabled = state.polishedTextValue.text.isNotBlank(),
+                onClick = viewModel::manualSaveCurrentNote,
             )
             ActionIconButton(
                 icon = Icons.Filled.ContentCopy,

@@ -59,6 +59,7 @@ data class AppSettings(
     val serverPath: String = "/transcribe",
     val serverTimeoutSeconds: Int = 360,
     val vibrationDurationMs: Int = DEFAULT_VIBRATION_DURATION_MS,
+    val autoSaveNotes: Boolean = true,
 ) {
     fun selfHostedUrl(): String? {
         val host = serverHost.trim()
