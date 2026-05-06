@@ -1500,9 +1500,9 @@ def check_dependencies():
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    app.setApplicationName("listen-and-polish")
+    app.setApplicationName("PressScribe")
     if sys.platform.startswith("linux"):
-        app.setDesktopFileName("listen-and-polish.desktop")
+        app.setDesktopFileName("pressscribe.desktop")
     check_dependencies()
     window = MainWindow()
     window.show()
